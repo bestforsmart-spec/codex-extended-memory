@@ -35,6 +35,11 @@ def collect(root):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # на Windows вывод в трубу идёт не в UTF-8
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     root = pathlib.Path(sys.argv[1]).resolve()
     out = pathlib.Path(sys.argv[2])
     out.parent.mkdir(parents=True, exist_ok=True)
