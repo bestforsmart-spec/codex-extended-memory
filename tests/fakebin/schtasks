@@ -1,0 +1,17 @@
+#!/bin/bash
+# Имитация schtasks для проверки установщика Windows на Маке:
+# записывает аргументы в журнал и сохраняет рядом переданный XML.
+LOG="${FAKE_SCHTASKS_LOG:?нужна переменная FAKE_SCHTASKS_LOG}"
+printf '%s\n' "$*" >> "$LOG"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "/XML" ]; then
+    cp "$arg" "$(dirname "$LOG")/seen-$(basename "$arg")"
+    if [ -n "${FAKE_SCHTASKS_FAIL_XML:-}" ]; then
+      echo "ERROR: The task XML is malformed (fake)."
+      exit 1
+    fi
+  fi
+  prev="$arg"
+done
+echo "SUCCESS: The scheduled task has successfully been created (fake)."
