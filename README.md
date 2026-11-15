@@ -44,6 +44,8 @@
 
 Установщик найдёт Python и скачает модель смыслового поиска `bge-m3` (около 1,2 ГБ, один раз). Он пропишет память в настройки Кодекса, предварительно сделав их копии в папке `backups` внутри памяти. Затем загрузит в память значимые ходы ваших сессий Кодекса за последние 120 дней и включит фоновое обновление индекса.
 
+**Где взять пакет.** Клонируйте репозиторий — `git clone https://github.com/bestforsmart-spec/codex-extended-memory.git` — или скачайте его архивом: на [странице репозитория](https://github.com/bestforsmart-spec/codex-extended-memory) кнопка **Code → Download ZIP**. У такого архива папка называется `codex-extended-memory-main` — подставляйте это имя в шагах ниже.
+
 ### macOS и Linux
 
 На Маке Python уже есть, если стоят Command Line Tools; если нет, установщик подскажет.
@@ -70,7 +72,7 @@
 
 Память ставится в `%USERPROFILE%\.codex-memory`, фоновое обновление индекса делают две задачи Планировщика заданий (`CodexMemorySync` и `CodexMemoryMaintain`); права администратора не нужны. Если Кодекс у вас работает внутри WSL, ставьте память там же, как на Linux: `bash install.sh`.
 
-Поддержка Windows появилась в версии 1.1.0. Установку, хуки, сервер памяти, фоновые задачи и поиск по смыслу проверяют автоматические тесты на Windows Server 2025. Если на вашем компьютере что-то не заведётся, напишите мне (контакты в конце) — починю.
+Поддержка Windows появилась в версии 1.1.0. Установку, хуки, сервер памяти, фоновые задачи и поиск по смыслу проверяют [автоматические тесты](https://github.com/bestforsmart-spec/codex-extended-memory/actions) на Windows Server 2025. Если на вашем компьютере что-то не заведётся, напишите мне (контакты в конце) — починю.
 
 ### После установки
 
@@ -241,4 +243,4 @@ bash ~/.codex-memory/uninstall.sh
 
 ## Автор и связь
 
-Сделал Эмиль Каимов. Вопросы, идеи и сообщения об ошибках — в Telegram: [t.me/bestforsmart](https://t.me/bestforsmart).
+Сделал Эмиль Каимов. Вопросы и идеи — в Telegram: [t.me/bestforsmart](https://t.me/bestforsmart). Исходный код и сообщения об ошибках — на GitHub: [bestforsmart-spec/codex-extended-memory](https://github.com/bestforsmart-spec/codex-extended-memory).
