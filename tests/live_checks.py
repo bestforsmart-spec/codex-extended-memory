@@ -6,6 +6,7 @@ usage:
       кладёт поддельную сессию Кодекса, чтобы при установке проверилась загрузка истории
   live_checks.py installed --memory-home DIR --codex-home DIR
                            [--install-log FILE] [--expect-codex] [--expect-schedule] [--expect-history]
+                           [--expect-embeddings]
       проверяет установку: файлы, настройки Кодекса, командную строку, хуки (так, как их запускает
       Кодекс), сервер MCP, замок индекса, фоновые задачи
   live_checks.py removed   --memory-home DIR --codex-home DIR [--purged]
@@ -57,6 +58,9 @@ STOP_WORD = "кипарисовый"
 STOP_PROJECT = "проект памяти"
 MCP_NOTE = "Поставщику «Берёзка» платим в течение двадцати дней, счёт присылает бухгалтер Лаврентьева."
 MCP_WORD = "Лаврентьева"
+SEMANTIC_NOTE = "Рассылку отправляем через SMTP-релей: при прямой отправке почта оседала в папке нежелательных сообщений."
+SEMANTIC_QUERY = "письма попадают в спам"
+SEMANTIC_MARK = "SMTP-релей"
 
 WINDOWS_ENV = (
     "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "USERPROFILE", "USERNAME", "USERDOMAIN",
@@ -467,13 +471,38 @@ def check_schedule(mem_home: Path) -> None:
             info(line.strip())
 
 
-def check_doctor(mem_home: Path, codex_home: Path) -> None:
+def check_semantic(mem_home: Path, codex_home: Path) -> None:
+    section("Поиск по смыслу (Ollama)")
+    code, out, err = run_cli(mem_home, codex_home, "remember", SEMANTIC_NOTE)
+    check("запись для проверки смысла сохранена", code == 0 and "Сохранено" in out, short(out + err))
+    status: Dict[str, Any] = {}
+    deadline = time.time() + 1200
+    while time.time() < deadline:
+        code, out, err = run_cli(mem_home, codex_home, "status", "--json")
+        try:
+            status = json.loads(out)
+        except ValueError:
+            status = {}
+        if status.get("embedding_enabled") and 0 < status.get("chunks", 0) <= status.get("embeddings", 0):
+            break
+        run_cli(mem_home, codex_home, "sync", "--quiet", timeout=1200)  # досчитываем сами, если фон ещё не успел
+    info(f"модель {status.get('embedding_model')}, фрагментов {status.get('chunks')}, векторов {status.get('embeddings')}")
+    check("смысловой поиск включён", status.get("embedding_enabled"), short(str(status), 300))
+    check("векторы посчитаны для всех фрагментов", 0 < status.get("chunks", 0) <= status.get("embeddings", 0), short(str(status), 300))
+    code, out, err = run_cli(mem_home, codex_home, "search", SEMANTIC_QUERY)
+    info(short(out, 400))
+    check("запрос другими словами находит запись по смыслу", code == 0 and SEMANTIC_MARK in out, short(out + err, 400))
+
+
+def check_doctor(mem_home: Path, codex_home: Path, embeddings: bool = False) -> None:
     section("Диагностика")
     check("перед диагностикой индекс свободен", wait_no_lock(mem_home))
     code, out, err = run_cli(mem_home, codex_home, "doctor")
     for line in out.splitlines():
         info(line)
     check("memory doctor: всё в порядке", code == 0 and "Всё в порядке" in out, short(err))
+    if embeddings:
+        check("memory doctor: эмбеддинги работают", "эмбеддинги работают" in out)
 
 
 def check_install_log(path: Path, expect_codex: bool) -> None:
@@ -500,7 +529,9 @@ def installed(args: argparse.Namespace) -> int:
     check_lock(mem_home)
     if args.expect_schedule:
         check_schedule(mem_home)
-    check_doctor(mem_home, codex_home)
+    if args.expect_embeddings:
+        check_semantic(mem_home, codex_home)
+    check_doctor(mem_home, codex_home, args.expect_embeddings)
     if args.install_log:
         check_install_log(Path(args.install_log), args.expect_codex)
     return 0
@@ -561,6 +592,7 @@ def main() -> int:
     p.add_argument("--expect-codex", action="store_true")
     p.add_argument("--expect-schedule", action="store_true")
     p.add_argument("--expect-history", action="store_true")
+    p.add_argument("--expect-embeddings", action="store_true")
     p = sub.add_parser("removed")
     p.add_argument("--memory-home", required=True)
     p.add_argument("--codex-home", required=True)

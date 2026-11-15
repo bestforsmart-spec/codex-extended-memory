@@ -1,0 +1,62 @@
+name: Поиск по смыслу на Windows
+
+# Тяжёлая проверка: скачивает Ollama (1,5 ГБ) и модель bge-m3 (1,2 ГБ). Запускается только вручную.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ollama:
+    name: Windows · Ollama, модель bge-m3 и поиск по смыслу
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ollama — официальная сборка для Windows
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\ollama.zip"
+          curl.exe -fsSL -o $zip https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $dir = "$env:RUNNER_TEMP\ollama"
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          tar -xf $zip -C $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item -LiteralPath $zip
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$dir\ollama.exe" --version
+          Get-ChildItem $dir | ForEach-Object { $_.Name }
+
+      - name: install.cmd — сам запускает Ollama и скачивает модель
+        shell: cmd
+        run: call install.cmd --no-pause --no-history > "%RUNNER_TEMP%\install.log" 2>&1
+
+      - name: Журнал установки
+        if: always()
+        shell: pwsh
+        run: Get-Content -LiteralPath "$env:RUNNER_TEMP\install.log" -Encoding utf8 | Where-Object { $_ -notmatch 'pulling [0-9a-f]{8}' }
+
+      - name: Живые проверки с поиском по смыслу
+        shell: pwsh
+        run: python tests\live_checks.py installed --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex" --install-log "$env:RUNNER_TEMP\install.log" --expect-schedule --expect-embeddings
+
+      - name: Журналы памяти и Ollama
+        if: always()
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-ChildItem "$env:USERPROFILE\.codex-memory\logs" -ErrorAction SilentlyContinue | ForEach-Object {
+            "----- $($_.Name)"
+            Get-Content -LiteralPath $_.FullName -Encoding utf8 -Tail 25
+          }
+
+      - name: uninstall.cmd
+        shell: cmd
+        run: call "%USERPROFILE%\.codex-memory\uninstall.cmd" --no-pause
+
+      - name: Проверки после удаления
+        shell: pwsh
+        run: python tests\live_checks.py removed --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex"
