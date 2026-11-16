@@ -1,59 +1,62 @@
-# Расширенная память для Кодекса
+# Extended Memory for Codex
 
-**Русский** · [English](https://github.com/bestforsmart-spec/codex-extended-memory/blob/main/README.en.md)
+[Русский](https://github.com/bestforsmart-spec/codex-extended-memory/blob/main/README.ru.md) · **English**
 
-Новая сессия Кодекса начинается с чистого листа: каждый раз приходится заново объяснять, кто вы, как устроен проект и что уже пробовали. Этот пакет даёт ему **долговременную память**. Она работает целиком на вашем компьютере, ничего не отправляет наружу и ставится одной командой. К той же памяти подключаются Claude Code и другие агенты: что записал один, находит другой.
+Every new Codex session starts from a blank slate: you explain again who you are, how the project is set up and what you have already tried. This package gives Codex **long-term memory**. It runs entirely on your computer, sends nothing out and installs with one command. Claude Code and other agents can connect to the same memory: what one writes, another finds.
 
-У Кодекса есть и встроенная память, но по умолчанию она выключена и устроена иначе — сравнение [ниже](#чем-отличается-от-встроенной-памяти-кодекса).
+Codex has built-in memory too, but it is off by default and works differently — see the comparison [below](#how-it-differs-from-the-built-in-codex-memory).
 
-## Что вы получите
+> **Languages.** The package speaks English and Russian. The installer picks one from your system language, and `memory lang en` or `memory lang ru` switches it at any time. The author uses it daily in Russian; the English setup is checked by the automated tests.
 
-- **Кодекс помнит вас и ваши правила.** Главная память `MEMORY.md` сама подмешивается в начало каждой сессии.
-- **Кодекс помнит, что вы делали раньше.** Дневник решений, автозаписи значимых ходов и история прошлых сессий Кодекса. Поиск идёт и по словам, и по смыслу: на «письма уходят в спам» найдётся заметка про SMTP-релей.
-- **Кодекс записывает сам.** Итоги работы, принятые решения и их причины, состояние проектов. Если агент забудет записать, страховочный хук сохранит итог значимого хода.
-- **Одна память на всех агентов.** Claude Code, Claude Desktop, Cursor, Gemini CLI и другие агенты с поддержкой MCP подключаются к той же памяти. Договорились о чём-то в одном — другой уже в курсе.
-- **Память ваша, а не сервиса.** Это обычные файлы на вашем диске. Заблокировали аккаунт, закончилась подписка, сменили агента — память остаётся у вас, и её можно подключить к другому агенту.
-- **Не тратит токены.** Раскладывает записи по смыслу и ищет локальная модель: ни токены, ни лимиты подписки на это не уходят. В контекст агента попадают только короткая главная память и найденные фрагменты.
-- **Приватно.** Всё лежит в `~/.codex-memory` (на Windows это `%USERPROFILE%\.codex-memory`). Смысловой поиск считает локальная модель через Ollama. Пароли, токены и ключи вычищаются автоматически.
-- **macOS, Linux и Windows.** Установщик есть для каждой системы.
+## What you get
 
-## Как это устроено
+- **Codex remembers you and your rules.** The main memory file, `MEMORY.md`, is added to the start of every session.
+- **Codex remembers what you did before.** A journal of decisions, automatic records of significant turns and the history of past Codex sessions. Search works by keywords and by meaning: "emails go to spam" finds the note about the SMTP relay.
+- **Codex writes things down itself.** Results of the work, decisions and the reasons behind them, project state. If the agent forgets, a safety-net hook saves the outcome of a significant turn.
+- **One memory for all agents.** Claude Code, Claude Desktop, Cursor, Gemini CLI and other MCP-capable agents connect to the same memory. Agree on something in one, and the other already knows.
+- **The memory is yours, not a service's.** It is ordinary files on your disk. If your account is blocked, your subscription ends or you switch agents, the memory stays with you and can be connected to another agent.
+- **No tokens spent.** A local model sorts records by meaning and searches them: neither tokens nor subscription limits are used for that. Only the short main memory and the fragments that were found go into the agent's context.
+- **Private.** Everything lives in `~/.codex-memory` (on Windows, `%USERPROFILE%\.codex-memory`). Semantic search runs on a local model through Ollama. Passwords, tokens and keys are scrubbed automatically.
+- **macOS, Linux and Windows.** There is an installer for each system.
+- **In English and Russian.** The installer picks the language from your system, and one command switches it.
+
+## How it works
 
 ```
-┌──────────────────────── Кодекс ─────────────────────────┐
-│ начало сессии ──► хук SessionStart ──► подмешивает MEMORY.md + свежий дневник
-│ по ходу работы ─► MCP-сервер extended-memory:
-│                    memory_search / memory_show        — вспомнить
-│                    memory_remember / memory_curate    — записать
-│                    memory_forget                      — забыть
-│ конец хода ─────► хук Stop ──► автозапись «запрос → итог» (только значимые ходы)
+┌──────────────────────── Codex ──────────────────────────┐
+│ session start ──► SessionStart hook ──► adds MEMORY.md + the recent journal
+│ during work ────► MCP server extended-memory:
+│                    memory_search / memory_show        — recall
+│                    memory_remember / memory_curate    — write down
+│                    memory_forget                      — forget
+│ end of turn ────► Stop hook ──► auto-record "request → result" (significant turns only)
 └─────────────────────────────────────────────────────────┘
                               │
 ~/.codex-memory/
-├── MEMORY.md            главная память — коротко, видна в каждой сессии
-├── memory/ГГГГ-ММ-ДД.md дневник (memory_remember)
-├── memory/auto/         автозаписи хука Stop
-├── memory/history/      история прошлых сессий Кодекса
-├── index-roots.json     что индексировать и чем считать смысл
-└── .index/              поисковый индекс: слова (SQLite FTS5) + смысл (векторы bge-m3)
+├── MEMORY.md            main memory — short, visible in every session
+├── memory/YYYY-MM-DD.md journal (memory_remember)
+├── memory/auto/         automatic records from the Stop hook
+├── memory/history/      history of past Codex sessions
+├── index-roots.json     what to index and which model computes meaning
+└── .index/              search index: words (SQLite FTS5) + meaning (bge-m3 vectors)
 ```
 
-Инструкции для агента (когда вспоминать и что записывать) добавляются в `~/.codex/AGENTS.md`.
+Instructions for the agent (when to recall and what to write down) are added to `~/.codex/AGENTS.md`.
 
-## Установка (около 5 минут)
+## Installation (about 5 minutes)
 
-**Нужно:** macOS, Linux или Windows 10/11, Кодекс (приложение или CLI) и Python 3.8+. **Желательно:** Ollama для поиска по смыслу. Без неё память тоже работает, но ищет только по словам.
+**You need:** macOS, Linux or Windows 10/11, Codex (app or CLI) and Python 3.8+. **Recommended:** Ollama for semantic search. Without it the memory still works, but it searches by keywords only.
 
-Установщик найдёт Python и скачает модель смыслового поиска `bge-m3` (около 1,2 ГБ, один раз). Он пропишет память в настройки Кодекса, предварительно сделав их копии в папке `backups` внутри памяти. Затем загрузит в память значимые ходы ваших сессий Кодекса за последние 120 дней и включит фоновое обновление индекса.
+The installer finds Python and downloads the `bge-m3` semantic search model (about 1.2 GB, once). It registers the memory in the Codex settings, after saving copies of them in the `backups` folder inside the memory folder. Then it loads the significant turns of your Codex sessions from the last 120 days into the memory and turns on background index updates.
 
-**Где взять пакет.** Клонируйте репозиторий — `git clone https://github.com/bestforsmart-spec/codex-extended-memory.git` — или скачайте его архивом: на [странице репозитория](https://github.com/bestforsmart-spec/codex-extended-memory) кнопка **Code → Download ZIP**. У такого архива папка называется `codex-extended-memory-main` — подставляйте это имя в шагах ниже.
+**Where to get the package.** Clone the repository — `git clone https://github.com/bestforsmart-spec/codex-extended-memory.git` — or download it as an archive: the **Code → Download ZIP** button on the [repository page](https://github.com/bestforsmart-spec/codex-extended-memory). The folder in that archive is called `codex-extended-memory-main` — use that name in the steps below.
 
-### macOS и Linux
+### macOS and Linux
 
-На Маке Python уже есть, если стоят Command Line Tools; если нет, установщик подскажет.
+On a Mac, Python is already there if the Command Line Tools are installed; if not, the installer tells you what to do.
 
-1. *(Рекомендуется)* Поставьте Ollama: `brew install ollama` или скачайте приложение с [ollama.com](https://ollama.com) и запустите его.
-2. Распакуйте архив и запустите установщик в Терминале:
+1. *(Recommended)* Install Ollama: `brew install ollama`, or download the app from [ollama.com](https://ollama.com) and start it.
+2. Unpack the archive and run the installer in Terminal:
 
    ```bash
    cd ~/Downloads/codex-extended-memory
@@ -64,63 +67,75 @@
 
 ### Windows
 
-1. *(Рекомендуется)* Поставьте Ollama: скачайте установщик с [ollama.com/download](https://ollama.com/download) или выполните в PowerShell `winget install -e --id Ollama.Ollama`.
-2. Если Python ещё не установлен: `winget install -e --id Python.Python.3.13` или установщик с [python.org](https://www.python.org/downloads/) (отметьте «Add python.exe to PATH»).
-3. Распакуйте архив **целиком** (правой кнопкой → «Извлечь все»), откройте папку `codex-extended-memory` и запустите `install.cmd` двойным щелчком. Windows может переспросить, запускать ли файл из интернета, — разрешите. То же из терминала, находясь в этой папке:
+1. *(Recommended)* Install Ollama: download the installer from [ollama.com/download](https://ollama.com/download) or run `winget install -e --id Ollama.Ollama` in PowerShell.
+2. If Python is not installed yet: `winget install -e --id Python.Python.3.13`, or the installer from [python.org](https://www.python.org/downloads/) (tick "Add python.exe to PATH").
+3. Unpack the archive **completely** (right-click → "Extract All"), open the `codex-extended-memory` folder and double-click `install.cmd`. Windows may ask whether to run a file from the internet — allow it. The same from a terminal, inside that folder:
 
    ```powershell
    .\install.cmd
    ```
 
-Память ставится в `%USERPROFILE%\.codex-memory`, фоновое обновление индекса делают две задачи Планировщика заданий (`CodexMemorySync` и `CodexMemoryMaintain`); права администратора не нужны. Если Кодекс у вас работает внутри WSL, ставьте память там же, как на Linux: `bash install.sh`.
+The memory is installed to `%USERPROFILE%\.codex-memory`, and two Task Scheduler tasks (`CodexMemorySync` and `CodexMemoryMaintain`) update the index in the background; administrator rights are not needed. If your Codex runs inside WSL, install the memory there, as on Linux: `bash install.sh`.
 
-Поддержка Windows появилась в версии 1.1.0. Установку, хуки, сервер памяти, фоновые задачи и поиск по смыслу проверяют [автоматические тесты](https://github.com/bestforsmart-spec/codex-extended-memory/actions) на Windows Server 2025. Если на вашем компьютере что-то не заведётся, напишите мне (контакты в конце) — починю.
+Windows support arrived in version 1.1.0. Installation, hooks, the memory server, background tasks and semantic search are checked by [automated tests](https://github.com/bestforsmart-spec/codex-extended-memory/actions) on Windows Server 2025. If something does not work on your computer, write to me (contacts at the end) and I will fix it.
 
-### После установки
+### After installation
 
-1. **Полностью перезапустите Кодекс**: закройте приложение (на Маке — Cmd+Q) и откройте заново.
-2. Кодекс покажет **«Hooks need review»**. Выберите **«Trust all and continue»**. Без этого память не будет подмешиваться в начало сессии и автоматически сохраняться. Если окно пропустили: в CLI команда `/hooks`, в приложении — раздел хуков в настройках.
-3. Проверьте установку — все пункты должны быть с ✓:
+1. **Restart Codex completely**: quit the app (Cmd+Q on a Mac) and open it again.
+2. Codex will show **"Hooks need review"**. Choose **"Trust all and continue"**. Without this the memory will not be added to the start of a session or saved automatically. If you missed the prompt: the `/hooks` command in the CLI, or the hooks section of the app settings.
+3. Check the installation — every item should have a ✓:
 
    ```bash
    ~/.codex-memory/bin/memory doctor
    ```
 
-   На Windows (PowerShell):
+   On Windows (PowerShell):
 
    ```powershell
    & "$HOME\.codex-memory\bin\memory.cmd" doctor
    ```
-4. Спросите у Кодекса: «что ты помнишь обо мне?»
+4. Ask Codex: "what do you remember about me?"
 
-Параметры установщика: `bash install.sh --help` (на Windows — `.\install.cmd --help`). Например, `--no-history` — не загружать прошлые сессии, `--no-embeddings` — без Ollama, `--history-days 365` — загрузить историю за год.
+Installer options: `bash install.sh --help` (on Windows, `.\install.cmd --help`). For example, `--no-history` skips loading past sessions, `--no-embeddings` installs without Ollama, `--history-days 365` loads a year of history, and `--lang ru` installs in Russian.
 
-## Как пользоваться
+### Language
 
-Просто работайте, как раньше. Кодекс сам ищет в памяти перед задачами и записывает итоги. Полезные фразы:
+The memory runs in English or in Russian: that is the language of the installer and `memory` messages, of the `MEMORY.md` template and of the agent instructions in `AGENTS.md`. The installer chooses it for you: Russian on a Russian system, English on any other. To set the language at install time, add `--lang en` or `--lang ru`.
 
-- «запомни: деплой только через GitHub Actions» / «запомни обо мне: я бэкендер, пишу на Go»
-- «запомни: клиентам пишем на „вы“ и без смайликов» / «запомни: поставщику „Альфа“ платим через 14 дней»
-- «что ты помнишь про проект X?», «как мы в прошлый раз чинили ошибку Y?»
-- «забудь, что мы используем MySQL — перешли на PostgreSQL»
+To switch later:
 
-**Первым делом заполните «Обо мне» и «Правила работы»** в `~/.codex-memory/MEMORY.md`: 5–10 строк о себе, проектах и о том, как с вами работать. Можно просто сказать это Кодексу. Главную память держите короткой: она попадает в каждую сессию (до ~9000 символов), остальное найдётся поиском.
+```bash
+~/.codex-memory/bin/memory lang ru
+```
 
-### Не только для кода
+The command switches the messages and rewrites the agent instructions; restart Codex afterwards. To go back, run `memory lang en`. Your records are not changed by the switch, and you can keep them in any language. The language choice arrived in version 1.2.0; after an upgrade from an earlier version the memory stays in Russian until you switch it yourself.
 
-Память не привязана к программированию: она хранит то, что вы ей рассказали и что вы с агентом уже сделали. Что стоит рассказать, если вы не разработчик:
+## How to use it
 
-- **Своё дело.** Реквизиты, ставки и шаблоны документов, поставщики и цены, о чём договорились с клиентами.
-- **Тексты и маркетинг.** Тон бренда и запретные слова, брифы, что уже опубликовано, какие гипотезы проверяли.
-- **Отчёты и финансы.** Где лежат данные, шаблон отчёта, как сопоставлять статьи.
-- **Учёба и исследования.** Тему и план работы, прочитанные источники, требования к оформлению.
-- **Личные дела.** Свои категории расходов, как решали в прошлом году, где лежат документы.
+Just work as before. Codex searches the memory before tasks and writes down the results on its own. Useful phrases:
 
-Секреты — пароли, ключи, данные карт — рассказывать не нужно: память их всё равно вычищает.
+- "remember: deploy only through GitHub Actions" / "remember about me: I'm a backend developer, I write Go"
+- "remember: we write to clients formally, no emoji" / "remember: we pay supplier Alpha after 14 days"
+- "what do you remember about project X?", "how did we fix error Y last time?"
+- "forget that we use MySQL — we moved to PostgreSQL"
 
-## Одна память на всех агентов
+**First of all, fill in "About me" and "Working rules"** in `~/.codex-memory/MEMORY.md`: 5–10 lines about yourself, your projects and how to work with you. You can simply tell Codex. Keep the main memory short: it goes into every session (up to ~9,000 characters), and everything else is found by search.
 
-Сервер памяти — обычный локальный MCP-сервер, поэтому к той же папке `~/.codex-memory` можно подключить и других агентов. Они ищут и записывают через те же инструменты `memory_*`: что записал Кодекс, находит Claude, и наоборот. Смысл запросов для всех считает одна локальная модель.
+### Not only for code
+
+The memory is not tied to programming: it keeps what you told it and what you and the agent have already done. What is worth telling it if you are not a developer:
+
+- **Your business.** Company details, rates and document templates, suppliers and prices, what you agreed with clients.
+- **Writing and marketing.** Brand tone and banned words, briefs, what has already been published, which hypotheses you tested.
+- **Reports and finance.** Where the data lives, the report template, how to map line items.
+- **Study and research.** The topic and work plan, sources you have read, formatting requirements.
+- **Personal matters.** Your expense categories, how you decided things last year, where the documents are.
+
+You don't need to tell it secrets — passwords, keys, card details: the memory scrubs them anyway.
+
+## One memory for all agents
+
+The memory server is an ordinary local MCP server, so other agents can be connected to the same `~/.codex-memory` folder. They search and write through the same `memory_*` tools: what Codex wrote, Claude finds, and vice versa. One local model computes the meaning of queries for all of them.
 
 **Claude Code:**
 
@@ -134,15 +149,15 @@ claude mcp add extended-memory --scope user -e CODEX_MEMORY_HOME=$HOME/.codex-me
 gemini mcp add -s user -e CODEX_MEMORY_HOME=$HOME/.codex-memory extended-memory python3 $HOME/.codex-memory/app/mcp_server.py
 ```
 
-**Claude Desktop, Cursor и другие** подключают сервер блоком в своём файле настроек MCP. Готовый блок с вашими путями выведет команда:
+**Claude Desktop, Cursor and others** connect the server with a block in their MCP settings file. This command prints a ready block with your paths:
 
 ```bash
 python3 -c 'import json,os;h=os.path.expanduser("~/.codex-memory");print(json.dumps({"mcpServers":{"extended-memory":{"command":"python3","args":[h+"/app/mcp_server.py"],"env":{"CODEX_MEMORY_HOME":h}}}},indent=2))'
 ```
 
-Вставьте его в файл настроек: у Claude Desktop он открывается через Settings → Developer → Edit Config, у Cursor это `~/.cursor/mcp.json`. Если в файле уже есть раздел `mcpServers`, добавьте в него только запись `extended-memory`. После правки перезапустите агента.
+Paste it into the settings file: in Claude Desktop it opens via Settings → Developer → Edit Config; for Cursor it is `~/.cursor/mcp.json`. If the file already has an `mcpServers` section, add only the `extended-memory` entry to it. Restart the agent after editing.
 
-**На Windows** те же команды выглядят так (PowerShell):
+**On Windows** the same commands look like this (PowerShell):
 
 ```powershell
 claude mcp add extended-memory --scope user -e CODEX_MEMORY_HOME="$HOME\.codex-memory" -- python "$HOME\.codex-memory\app\mcp_server.py"
@@ -154,95 +169,96 @@ gemini mcp add -s user -e CODEX_MEMORY_HOME="$HOME\.codex-memory" extended-memor
 python -c "import json,os,sys;h=os.path.join(os.path.expanduser('~'),'.codex-memory');print(json.dumps({'mcpServers':{'extended-memory':{'command':sys.executable,'args':[os.path.join(h,'app','mcp_server.py')],'env':{'CODEX_MEMORY_HOME':h}}}},indent=2))"
 ```
 
-Что важно знать:
+Good to know:
 
-- **Автоматика настроена только для Кодекса.** Подмешивание памяти в начало сессии, автозапись ходов и загрузка истории работают в Кодексе. Остальные агенты находят то, что уже записано в память, и пишут в неё по просьбе «запомни…» или когда сами сочтут нужным.
-- **Подскажите агенту, как пользоваться памятью.** Скопируйте раздел «Расширенная память» из `~/.codex/AGENTS.md` в файл инструкций другого агента (у Claude Code это `~/.claude/CLAUDE.md`) — тогда он будет искать в памяти перед задачей и записывать итоги сам.
-- **Что проверено.** Пакет обкатан с Кодексом на macOS. Команды для Claude Code и Gemini CLI проверены на актуальных версиях на macOS. Установку на Windows и Linux проверяют автоматические тесты. Остальные агенты подключают локальные MCP-серверы по своей документации.
+- **Automation is set up only for Codex.** Adding the memory to the start of a session, auto-recording turns and loading history work in Codex. Other agents find what is already in the memory and write to it when you say "remember…" or when they decide to.
+- **Tell the agent how to use the memory.** Copy the "Extended memory" section from `~/.codex/AGENTS.md` into the other agent's instructions file (for Claude Code, `~/.claude/CLAUDE.md`) — then it will search the memory before a task and write down results itself.
+- **What has been tested.** The package is in daily use with Codex on macOS. The commands for Claude Code and Gemini CLI were checked on current versions on macOS. Installation on Windows and Linux is checked by automated tests, in both languages. Other agents connect local MCP servers according to their own documentation.
 
-## Чем отличается от встроенной памяти Кодекса
+## How it differs from the built-in Codex memory
 
-У Кодекса есть своя память (Memories). По умолчанию она выключена и в фоне собирает сводки прошлых сессий, а не ведёт записи по ходу работы.
+Codex has its own memory (Memories). It is off by default, and it collects summaries of past sessions in the background rather than keeping records as you work.
 
-| | Встроенная память | Расширенная память |
+| | Built-in memory | Extended memory |
 |---|---|---|
-| Когда записывает | в фоне, после простоя чата | сразу в конце значимого хода |
-| Как находит | общая сводка и чтение файлов; поиск по смыслу не описан | по словам и по смыслу, с русской морфологией |
-| Сколько помнит | по умолчанию — сессии за 30 дней | без срока давности: дневник и история не удаляются |
-| Как забыть одно | в документации — только сброс всей памяти | точечно: «забудь, что…» |
-| Что с файлами | сгенерированное состояние, править не советуют | обычный markdown, можно править |
-| Чем считает | моделью Кодекса, за счёт лимита подписки | локальной моделью, лимиты не тратятся |
-| Чья память | работает только в Кодексе | ваши файлы, подключаются к любому агенту с поддержкой MCP |
+| When it writes | in the background, after the chat has been idle | right at the end of a significant turn |
+| How it finds | a general summary and reading files; semantic search is not described | by keywords and by meaning, with stemming for English and Russian |
+| How much it remembers | by default, sessions from the last 30 days | no expiry: the journal and history are not deleted |
+| Forgetting one thing | the documentation describes only a full memory reset | targeted: "forget that…" |
+| The files | generated state, editing is not advised | plain markdown, you can edit it |
+| What computes it | the Codex model, out of your subscription limit | a local model, no limits spent |
+| Whose memory | works only in Codex | your files, which connect to any MCP-capable agent |
 
-Сверено с документацией Codex 15 ноября 2026 года (CLI 0.167). Встроенная память быстро развивается — сверяйтесь с актуальной версией.
+Checked against the Codex documentation on 15 November 2026 (CLI 0.167). The built-in memory is developing quickly — check the current version.
 
-## Командная строка
+## Command line
 
-Все команды: `~/.codex-memory/bin/memory --help`. Удобно завести псевдоним: `alias memory=~/.codex-memory/bin/memory`.
+All commands: `~/.codex-memory/bin/memory --help`. A handy alias: `alias memory=~/.codex-memory/bin/memory`.
 
-На Windows команда называется `memory.cmd`: в PowerShell — `& "$HOME\.codex-memory\bin\memory.cmd" --help`. Псевдоним на текущую сессию: `Set-Alias memory "$HOME\.codex-memory\bin\memory.cmd"`.
+On Windows the command is called `memory.cmd`: in PowerShell, `& "$HOME\.codex-memory\bin\memory.cmd" --help`. An alias for the current session: `Set-Alias memory "$HOME\.codex-memory\bin\memory.cmd"`.
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `memory status` | сколько всего в памяти, работает ли смысловой поиск |
-| `memory search "запрос"` | поиск, как его видит Кодекс |
-| `memory remember "факт"` | записать в дневник |
-| `memory curate "факт"` | записать в главную память |
-| `memory forget "фрагмент"` | удалить пункт (копия сохранится в `.state/forgotten.md`) |
-| `memory add-folder ~/Notes` | подключить к поиску свою папку с заметками (Obsidian и т.п.) |
-| `memory import-codex-history --days 365` | догрузить историю Кодекса за больший срок |
-| `memory context` | показать, что подмешивается в начало сессии |
-| `memory sync` | переиндексировать сейчас (обычно не нужно: это происходит само) |
-| `memory maintain` | вычистить секреты и дубли (запускается само каждую ночь) |
-| `memory doctor` | проверить установку |
+| `memory status` | how much is in the memory, whether semantic search works |
+| `memory search "query"` | search as Codex sees it |
+| `memory remember "fact"` | write to the journal |
+| `memory curate "fact"` | write to the main memory |
+| `memory forget "fragment"` | delete an item (a copy is kept in `.state/forgotten.md`) |
+| `memory add-folder ~/Notes` | add your own notes folder to search (Obsidian and the like) |
+| `memory import-codex-history --days 365` | load Codex history for a longer period |
+| `memory context` | show what is added to the start of a session |
+| `memory sync` | reindex now (usually not needed: it happens on its own) |
+| `memory maintain` | scrub secrets and duplicates (runs on its own every night) |
+| `memory lang ru` | switch the language of the messages and the agent instructions: `ru` or `en` |
+| `memory doctor` | check the installation |
 
-## Приватность и данные
+## Privacy and data
 
-- Всё хранится в `~/.codex-memory` с доступом только для вашего пользователя. Наружу ничего не уходит: векторы считает локальная Ollama.
-- Похожие на секреты строки (ключи API, токены, пароли, приватные ключи, JWT) заменяются на `[REDACTED]` при записи и при выдаче результатов.
-- Заметки — обычные markdown-файлы: их можно читать и править в любом редакторе.
-- Бэкап — скопировать папку `~/.codex-memory` (папку `.index` можно не копировать, индекс пересоберётся сам).
-- Перенос на другой компьютер: поставить пакет и скопировать туда `MEMORY.md` и `memory/`.
+- Everything is stored in `~/.codex-memory`, accessible only to your user. Nothing leaves your computer: vectors are computed by local Ollama.
+- Strings that look like secrets (API keys, tokens, passwords, private keys, JWTs) are replaced with `[REDACTED]` both when written and when results are returned.
+- Notes are ordinary markdown files: you can read and edit them in any editor.
+- Backup: copy the `~/.codex-memory` folder (you can skip `.index`; the index rebuilds itself).
+- Moving to another computer: install the package and copy `MEMORY.md` and `memory/` there.
 
-## Если что-то не работает
+## Troubleshooting
 
-Сначала запустите `~/.codex-memory/bin/memory doctor` (на Windows — `& "$HOME\.codex-memory\bin\memory.cmd" doctor`): он покажет, что именно не так.
+Start with `~/.codex-memory/bin/memory doctor` (on Windows, `& "$HOME\.codex-memory\bin\memory.cmd" doctor`): it shows what exactly is wrong.
 
-| Симптом | Что делать |
+| Symptom | What to do |
 |---|---|
-| Кодекс не видит инструменты `memory_*` | Полностью перезапустите Кодекс. В CLI команда `/mcp` показывает подключённые серверы. |
-| Память не подмешивается, нет автозаписей | Хуки не получили доверия: в CLI `/hooks` → Trust; в приложении подтвердите хуки в настройках. |
-| «смысловой поиск недоступен» | Ollama не запущена: откройте приложение Ollama или выполните `brew services start ollama`. |
-| Кодекс спрашивает подтверждение на каждую запись | Старая версия Кодекса без `approval_mode`: обновите Кодекс и запустите установщик ещё раз. |
-| Windows: `install.cmd` пишет «Python 3.8 or newer is required» | Python не установлен или не виден: поставьте его (шаг 2 установки), откройте новое окно терминала и запустите `install.cmd` снова. |
-| Windows: `install.cmd` пишет «The archive is not fully extracted» | Файл запущен прямо из архива. Распакуйте архив целиком и запустите `install.cmd` из распакованной папки. |
-| Windows: Кодекс работает в WSL и не видит память | Память нужно ставить там же, где работает Кодекс: внутри WSL командой `bash install.sh`. |
-| Поиск не находит свежую запись | `memory sync`, затем `memory status`: смотрите, сколько векторов уже посчитано. |
-| Другой агент не видит инструменты `memory_*` | Проверьте, что пути в его настройках MCP полные, без `~` и `$HOME`, и перезапустите агента. |
-| Что-то сломалось в настройках Кодекса | Копии исходных файлов лежат в `~/.codex-memory/backups/<дата>/`. |
+| Codex does not see the `memory_*` tools | Restart Codex completely. In the CLI, the `/mcp` command lists the connected servers. |
+| The memory is not added to sessions, there are no auto-records | The hooks have not been trusted: `/hooks` → Trust in the CLI; in the app, confirm the hooks in settings. |
+| "semantic search unavailable" | Ollama is not running: open the Ollama app or run `brew services start ollama`. |
+| Codex asks for confirmation on every write | An old Codex version without `approval_mode`: update Codex and run the installer again. |
+| Windows: `install.cmd` says "Python 3.8 or newer is required" | Python is not installed or cannot be found: install it (step 2 of the installation), open a new terminal window and run `install.cmd` again. |
+| Windows: `install.cmd` says "The archive is not fully extracted" | The file was run straight from the archive. Extract the archive completely and run `install.cmd` from the extracted folder. |
+| Windows: Codex runs in WSL and does not see the memory | Install the memory where Codex runs: inside WSL, with `bash install.sh`. |
+| Search does not find a fresh record | `memory sync`, then `memory status`: check how many vectors have been computed. |
+| Another agent does not see the `memory_*` tools | Check that the paths in its MCP settings are full, without `~` or `$HOME`, and restart the agent. |
+| Something broke in the Codex settings | Copies of the original files are in `~/.codex-memory/backups/<date>/`. |
 
-Журналы фоновых задач лежат в `~/.codex-memory/logs/`.
+Background task logs are in `~/.codex-memory/logs/`.
 
-## Удаление
+## Uninstalling
 
 ```bash
 bash ~/.codex-memory/uninstall.sh
 ```
 
-На Windows (PowerShell):
+On Windows (PowerShell):
 
 ```powershell
 & "$HOME\.codex-memory\uninstall.cmd"
 ```
 
-Команда убирает память из настроек Кодекса, фоновые задачи и саму программу. Ваши заметки и `MEMORY.md` остаются. Чтобы удалить и их, добавьте `--purge`: на Маке данные уйдут в Корзину, на Linux и Windows папка будет переименована — удалите её сами. Память, подключённую к другим агентам, отключите в их настройках сами: у Claude Code это `claude mcp remove extended-memory --scope user`.
+The command removes the memory from the Codex settings, the background tasks and the program itself. Your notes and `MEMORY.md` stay. To delete them as well, add `--purge`: on a Mac the data goes to the Trash; on Linux and Windows the folder is renamed, and you delete it yourself. Disconnect the memory from other agents in their own settings: for Claude Code, `claude mcp remove extended-memory --scope user`.
 
-## Для любопытных
+## For the curious
 
-- **Поиск:** SQLite FTS5 с упрощённым русским стеммером («Беты» найдёт «Бета») + векторы `bge-m3` через Ollama. Итоговый рейтинг смешивает смысловую близость, совпадение слов и заголовков. Каждый пункт списка индексируется отдельно, поэтому факты не смешиваются.
-- **Другая модель или сервер эмбеддингов:** `ollama pull qwen3-embedding:8b`, затем `memory embeddings on --model qwen3-embedding:8b`. Модель тяжелее и медленнее, а при нарезке «по пункту» (как здесь) точнее не стала — проверено; по умолчанию лучше `bge-m3`. Подойдёт и любой OpenAI-совместимый `/v1/embeddings` — поля `endpoint` и `apiKeyEnv` в `index-roots.json`. После смены модели векторы пересчитаются сами.
-- **Зависимости:** только стандартная библиотека Python, без pip и npm. Если стоит `numpy`, поиск по большому индексу будет быстрее.
+- **Search:** SQLite FTS5 with Porter stemming for English and a light Russian stemmer, plus `bge-m3` vectors through Ollama. The final ranking blends semantic similarity with keyword and heading matches. Each list item is indexed separately, so facts do not blur together.
+- **A different model or embedding server:** `ollama pull qwen3-embedding:8b`, then `memory embeddings on --model qwen3-embedding:8b`. That model is heavier and slower, and with per-item chunking (as here) it was not more accurate — tested; `bge-m3` is the better default. Any OpenAI-compatible `/v1/embeddings` endpoint works too: see the `endpoint` and `apiKeyEnv` fields in `index-roots.json`. After a model change the vectors are recomputed automatically.
+- **Dependencies:** only the Python standard library, no pip or npm. If `numpy` is installed, search over a large index is faster.
 
-## Автор и связь
+## Author and contact
 
-Сделал Эмиль Каимов. Вопросы и идеи — в Telegram: [t.me/bestforsmart](https://t.me/bestforsmart). Исходный код и сообщения об ошибках — на GitHub: [bestforsmart-spec/codex-extended-memory](https://github.com/bestforsmart-spec/codex-extended-memory).
+Made by Emil Kaimov. Questions and ideas — on Telegram: [t.me/bestforsmart](https://t.me/bestforsmart). Source code and bug reports — on GitHub: [bestforsmart-spec/codex-extended-memory](https://github.com/bestforsmart-spec/codex-extended-memory).

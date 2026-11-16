@@ -1,6 +1,6 @@
-name: Поиск по смыслу на Windows
+name: Semantic search on Windows
 
-# Тяжёлая проверка: скачивает Ollama (1,5 ГБ) и модель bge-m3 (1,2 ГБ). Запускается только вручную.
+# A heavy check: it downloads Ollama (1.5 GB) and the bge-m3 model (1.2 GB). Runs only by hand.
 on:
   workflow_dispatch:
 
@@ -9,13 +9,13 @@ permissions:
 
 jobs:
   ollama:
-    name: Windows · Ollama, модель bge-m3 и поиск по смыслу
+    name: Windows · Ollama, the bge-m3 model and search by meaning
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      - name: Ollama — официальная сборка для Windows
+      - name: Ollama — the official Windows build
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP\ollama.zip"
@@ -30,20 +30,20 @@ jobs:
           & "$dir\ollama.exe" --version
           Get-ChildItem $dir | ForEach-Object { $_.Name }
 
-      - name: install.cmd — сам запускает Ollama и скачивает модель
+      - name: install.cmd — starts Ollama and downloads the model by itself
         shell: cmd
         run: call install.cmd --no-pause --no-history > "%RUNNER_TEMP%\install.log" 2>&1
 
-      - name: Журнал установки
+      - name: Install log
         if: always()
         shell: pwsh
         run: Get-Content -LiteralPath "$env:RUNNER_TEMP\install.log" -Encoding utf8 | Where-Object { $_ -notmatch 'pulling [0-9a-f]{8}' }
 
-      - name: Живые проверки с поиском по смыслу
+      - name: Live checks with search by meaning
         shell: pwsh
-        run: python tests\live_checks.py installed --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex" --install-log "$env:RUNNER_TEMP\install.log" --expect-schedule --expect-embeddings
+        run: python tests\live_checks.py installed --lang en --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex" --install-log "$env:RUNNER_TEMP\install.log" --expect-schedule --expect-embeddings
 
-      - name: Журналы памяти и Ollama
+      - name: Memory and Ollama logs
         if: always()
         shell: pwsh
         continue-on-error: true
@@ -57,6 +57,6 @@ jobs:
         shell: cmd
         run: call "%USERPROFILE%\.codex-memory\uninstall.cmd" --no-pause
 
-      - name: Проверки после удаления
+      - name: Checks after removal
         shell: pwsh
         run: python tests\live_checks.py removed --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex"

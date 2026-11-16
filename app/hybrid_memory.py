@@ -31,7 +31,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-VERSION = "1.1.0"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:  # i18n.py лежит рядом: путь нужен, когда движок импортируют из другой папки
+    sys.path.insert(0, _HERE)
+
+import i18n  # noqa: E402
+from i18n import L  # noqa: E402
+
+VERSION = "1.2.0"
 SERVER_NAME = "extended-memory"
 
 
@@ -63,21 +70,27 @@ DEFAULT_MODEL = "bge-m3"
 LOCK_STALE_SECONDS = 2 * 60 * 60
 LOCK_HARD_STALE_SECONDS = 24 * 60 * 60  # старше суток замок чужой: после перезагрузки его pid мог достаться другому процессу
 SCHEMA_VERSION = "2"
-CURATED_SECTION = "## Активная память"
+# Раздел MEMORY.md для новых фактов: находится по любому из двух заголовков, создаётся на текущем языке.
+CURATED_SECTIONS = ("## Активная память", "## Active memory")
 MEMORY_CONTEXT_LIMIT = 9000  # столько символов MEMORY.md уходит в начало каждой сессии
 DEFAULT_EXCLUDE_DIRS = {
     ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
     ".next", ".cache", ".idea", ".vscode", ".obsidian", ".trash", ".Trash", "vendor", "coverage",
 }
 CATEGORY_LABELS = {
-    "preference": "предпочтение",
-    "workflow": "правило",
-    "project": "проект",
-    "infrastructure": "инфраструктура",
-    "decision": "решение",
-    "person": "люди",
-    "other": "заметка",
+    "preference": L("предпочтение", "preference"),
+    "workflow": L("правило", "rule"),
+    "project": L("проект", "project"),
+    "infrastructure": L("инфраструктура", "infrastructure"),
+    "decision": L("решение", "decision"),
+    "person": L("люди", "people"),
+    "other": L("заметка", "note"),
 }
+
+
+def curated_section() -> str:
+    """Заголовок раздела для новых фактов на текущем языке."""
+    return CURATED_SECTIONS[1] if i18n.current() == "en" else CURATED_SECTIONS[0]
 
 
 # ---------------------------------------------------------------- утилиты
@@ -221,7 +234,10 @@ def load_config() -> Dict[str, Any]:
     try:
         data = json.loads(read_text(CONFIG_PATH))
     except Exception as exc:  # битый JSON не должен ломать поиск
-        warn(f"не удалось прочитать {CONFIG_PATH}: {exc}; использую настройки по умолчанию")
+        warn(L(
+            f"не удалось прочитать {CONFIG_PATH}: {exc}; использую настройки по умолчанию",
+            f"could not read {CONFIG_PATH}: {exc}; using the default settings",
+        ))
         return config
     for key, value in data.items():
         if isinstance(value, dict) and isinstance(config.get(key), dict):
@@ -651,25 +667,29 @@ class Embedder:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")[:300]
             if exc.code == 404 or "not found" in body.lower():
-                raise EmbedderUnavailable(
-                    f"модель {self.model} не найдена ({body.strip() or exc.code}); выполните: ollama pull {self.model}"
-                )
+                raise EmbedderUnavailable(L(
+                    f"модель {self.model} не найдена ({body.strip() or exc.code}); выполните: ollama pull {self.model}",
+                    f"model {self.model} not found ({body.strip() or exc.code}); run: ollama pull {self.model}",
+                ))
             raise RuntimeError(f"HTTP {exc.code}: {body.strip()}")
         except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
-            raise EmbedderUnavailable(f"сервер эмбеддингов {self.endpoint} не отвечает: {exc}")
+            raise EmbedderUnavailable(L(
+                f"сервер эмбеддингов {self.endpoint} не отвечает: {exc}",
+                f"embedding server {self.endpoint} is not responding: {exc}",
+            ))
         if isinstance(data, dict) and data.get("embeddings") is not None:
             return data["embeddings"]
         if isinstance(data, dict) and isinstance(data.get("data"), list):
             return [item["embedding"] for item in sorted(data["data"], key=lambda it: it.get("index", 0))]
         if isinstance(data, dict) and data.get("embedding") is not None:
             return [data["embedding"]]
-        raise RuntimeError("в ответе нет эмбеддингов")
+        raise RuntimeError(L("в ответе нет эмбеддингов", "no embeddings in the response"))
 
     def embed(self, texts: Sequence[str]) -> List[List[float]]:
         if not self.enabled:
-            raise EmbedderUnavailable("эмбеддинги выключены")
+            raise EmbedderUnavailable(L("эмбеддинги выключены", "embeddings are off"))
         if not self.available:
-            raise EmbedderUnavailable(self.last_error or "сервер эмбеддингов недоступен")
+            raise EmbedderUnavailable(self.last_error or L("сервер эмбеддингов недоступен", "embedding server is unavailable"))
         try:
             vectors = self._request(texts)
         except EmbedderUnavailable as exc:
@@ -677,7 +697,10 @@ class Embedder:
             self.last_error = str(exc)
             raise
         if len(vectors) != len(texts):
-            raise RuntimeError(f"ожидалось {len(texts)} векторов, пришло {len(vectors)}")
+            raise RuntimeError(L(
+                f"ожидалось {len(texts)} векторов, пришло {len(vectors)}",
+                f"expected {len(texts)} vectors, got {len(vectors)}",
+            ))
         return vectors
 
 
@@ -756,7 +779,7 @@ def embed_missing(
             done += 1
         conn.commit()
         if not quiet:
-            print(f"  векторы: {done}/{len(rows)}", flush=True)
+            print(L(f"  векторы: {done}/{len(rows)}", f"  vectors: {done}/{len(rows)}"), flush=True)
     if not failed:
         meta_set(conn, "last_embedding_error", "")
     meta_set(conn, "last_embedding_ok_at", str(time.time()))
@@ -836,7 +859,7 @@ def sync(
                 if _index_file(conn, logical, abs_path):
                     updated += 1
                     if not quiet:
-                        print(f"  проиндексирован {logical}", flush=True)
+                        print(L(f"  проиндексирован {logical}", f"  indexed {logical}"), flush=True)
             if only is None:
                 for row in conn.execute("SELECT path FROM file_state").fetchall():
                     if row["path"] not in current:
@@ -883,7 +906,8 @@ def try_sync(**kwargs: Any) -> Dict[str, Any]:
     try:
         return {"ok": True, **sync(**kwargs)}
     except SyncBusy:
-        return {"ok": True, "busy": True, "note": "индекс уже обновляется фоновой задачей"}
+        note = L("индекс уже обновляется фоновой задачей", "the index is already being updated by a background task")
+        return {"ok": True, "busy": True, "note": note}
     except Exception as exc:
         return {"ok": False, "error": one_line(str(exc), 300)}
 
@@ -1165,11 +1189,20 @@ def format_search(payload: Dict[str, Any]) -> str:
     results = payload.get("results") or []
     lines: List[str] = []
     if payload.get("index", {}).get("files", 0) == 0:
-        return "Индекс пуст: память ещё не проиндексирована (memory sync) или в ней нет заметок."
+        return L(
+            "Индекс пуст: память ещё не проиндексирована (memory sync) или в ней нет заметок.",
+            "The index is empty: the memory has not been indexed yet (memory sync) or it has no notes.",
+        )
     if not results:
-        lines.append(f"По запросу «{payload.get('query')}» ничего не найдено. Попробуй другие ключевые слова.")
+        lines.append(L(
+            f"По запросу «{payload.get('query')}» ничего не найдено. Попробуй другие ключевые слова.",
+            f"Nothing found for \"{payload.get('query')}\". Try other keywords.",
+        ))
     for idx, item in enumerate(results, start=1):
-        head = f"[{idx}] {item['path']}:{item['start_line']}-{item['end_line']}  (оценка {item['score']:.3f})"
+        head = L(
+            f"[{idx}] {item['path']}:{item['start_line']}-{item['end_line']}  (оценка {item['score']:.3f})",
+            f"[{idx}] {item['path']}:{item['start_line']}-{item['end_line']}  (score {item['score']:.3f})",
+        )
         lines.append(head)
         if item.get("heading"):
             lines.append(f"    § {item['heading']}")
@@ -1177,9 +1210,15 @@ def format_search(payload: Dict[str, Any]) -> str:
             lines.append(f"    {line}")
         lines.append("")
     if payload.get("semantic_error"):
-        lines.append(f"(смысловой поиск недоступен — искал только по словам: {one_line(payload['semantic_error'], 160)})")
+        lines.append(L(
+            f"(смысловой поиск недоступен — искал только по словам: {one_line(payload['semantic_error'], 160)})",
+            f"(semantic search unavailable — searched by keywords only: {one_line(payload['semantic_error'], 160)})",
+        ))
     if results:
-        lines.append("Полный текст фрагмента: memory_show(path, start, end).")
+        lines.append(L(
+            "Полный текст фрагмента: memory_show(path, start, end).",
+            "Full text of a fragment: memory_show(path, start, end).",
+        ))
     return "\n".join(lines).rstrip()
 
 
@@ -1199,13 +1238,13 @@ def show(path: str, start: int = 1, end: Optional[int] = None) -> str:
         try:
             target.relative_to(HOME_DIR)
         except ValueError:
-            raise ValueError(f"нет такого файла в памяти: {path}")
+            raise ValueError(L(f"нет такого файла в памяти: {path}", f"no such file in the memory: {path}"))
     if not target.exists():
-        raise ValueError(f"файл не найден: {path}")
+        raise ValueError(L(f"файл не найден: {path}", f"file not found: {path}"))
     lines = read_text(target).splitlines()
     end = min(len(lines), end)
     out = [f"{idx:>5}  {lines[idx - 1]}" for idx in range(start, end + 1)]
-    footer = f"\n… (всего строк: {len(lines)})" if end < len(lines) else ""
+    footer = L(f"\n… (всего строк: {len(lines)})", f"\n… (total lines: {len(lines)})") if end < len(lines) else ""
     return redact("\n".join(out)) + footer
 
 
@@ -1225,7 +1264,7 @@ def daily_file(day: Optional[str] = None) -> Path:
 def remember(note: str, source: Optional[str] = None) -> Dict[str, Any]:
     cleaned = redact(note).strip()
     if not cleaned:
-        raise ValueError("пустая заметка")
+        raise ValueError(L("пустая заметка", "empty note"))
     target = daily_file()
     existing = read_text(target) if target.exists() else ""
     key = _normalize_note(cleaned.splitlines()[0])
@@ -1237,8 +1276,8 @@ def remember(note: str, source: Optional[str] = None) -> Dict[str, Any]:
     for extra in lines[1:]:
         entry += f"  {extra.rstrip()}\n" if extra.strip() else ""
     if source and source.strip():
-        entry += f"  — источник: {one_line(redact(source), 200)}\n"
-    header = "" if existing else f"# Дневник памяти — {today_str()}\n\n"
+        entry += L(f"  — источник: {one_line(redact(source), 200)}\n", f"  — source: {one_line(redact(source), 200)}\n")
+    header = "" if existing else L(f"# Дневник памяти — {today_str()}\n\n", f"# Memory journal — {today_str()}\n\n")
     append_text(target, header + entry)
     return {"saved": True, "path": str(target)}
 
@@ -1246,20 +1285,20 @@ def remember(note: str, source: Optional[str] = None) -> Dict[str, Any]:
 def curate(note: str, category: str = "other", source: Optional[str] = None) -> Dict[str, Any]:
     cleaned = one_line(redact(note), 2000)
     if not cleaned:
-        raise ValueError("пустая заметка")
-    text = read_text(MEMORY_FILE) if MEMORY_FILE.exists() else "# MEMORY.md — главная память\n"
+        raise ValueError(L("пустая заметка", "empty note"))
+    text = read_text(MEMORY_FILE) if MEMORY_FILE.exists() else L("# MEMORY.md — главная память\n", "# MEMORY.md — main memory\n")
     key = _normalize_note(cleaned)
     for line in text.splitlines():
         if line.startswith("- ") and _normalize_note(line) == key:
             return {"saved": False, "duplicate": True, "path": str(MEMORY_FILE), "chars": len(text)}
     if cleaned.lower() in text.lower():
         return {"saved": False, "duplicate": True, "path": str(MEMORY_FILE), "chars": len(text)}
-    label = CATEGORY_LABELS.get((category or "other").strip().lower(), (category or "заметка").strip().lower())
+    label = CATEGORY_LABELS.get((category or "other").strip().lower(), (category or L("заметка", "note")).strip().lower())
     src = f" _({one_line(redact(source), 120)})_" if source and source.strip() else ""
     entry = f"- **{today_str()} · {label}:** {cleaned}{src}"
     lines = text.rstrip("\n").splitlines()
     try:
-        idx = next(i for i, line in enumerate(lines) if line.strip() == CURATED_SECTION)
+        idx = next(i for i, line in enumerate(lines) if line.strip() in CURATED_SECTIONS)
         insert_at = idx + 1
         if insert_at < len(lines) and lines[insert_at].strip().startswith("<!--"):
             while insert_at < len(lines) and "-->" not in lines[insert_at]:
@@ -1267,14 +1306,16 @@ def curate(note: str, category: str = "other", source: Optional[str] = None) -> 
             insert_at += 1
         lines.insert(min(insert_at, len(lines)), entry)
     except StopIteration:
-        lines += ["", CURATED_SECTION, entry]
+        lines += ["", curated_section(), entry]
     new_text = "\n".join(lines) + "\n"
     atomic_write(MEMORY_FILE, new_text)
     result: Dict[str, Any] = {"saved": True, "path": str(MEMORY_FILE), "chars": len(new_text)}
     if len(new_text) > MEMORY_CONTEXT_LIMIT:
-        result["warning"] = (
+        result["warning"] = L(
             f"MEMORY.md уже {len(new_text)} символов (в начало сессии попадает {MEMORY_CONTEXT_LIMIT}). "
-            "Сожми: объедини похожие пункты, устаревшее убери через memory_forget."
+            "Сожми: объедини похожие пункты, устаревшее убери через memory_forget.",
+            f"MEMORY.md is already {len(new_text)} characters (the start of a session gets {MEMORY_CONTEXT_LIMIT}). "
+            "Shorten it: merge similar items and remove outdated ones with memory_forget.",
         )
     return result
 
@@ -1298,7 +1339,10 @@ def _bullet_blocks(lines: List[str]) -> List[Tuple[int, int]]:
 def forget(text: str, scope: str = "curated", all_matches: bool = False) -> Dict[str, Any]:
     needle = (text or "").strip().lower()
     if len(needle) < 4:
-        raise ValueError("укажи фрагмент текста подлиннее (от 4 символов), чтобы не удалить лишнее")
+        raise ValueError(L(
+            "укажи фрагмент текста подлиннее (от 4 символов), чтобы не удалить лишнее",
+            "give a longer text fragment (4 characters or more), so that nothing extra is deleted",
+        ))
     files = [MEMORY_FILE] if MEMORY_FILE.exists() else []
     if scope == "all" and NOTES_DIR.exists():
         files += sorted(NOTES_DIR.rglob("*.md"))
@@ -1310,11 +1354,14 @@ def forget(text: str, scope: str = "curated", all_matches: bool = False) -> Dict
             if needle in block.lower():
                 matches.append((path, start, end, block))
     if not matches:
-        return {"removed": 0, "message": "ничего не найдено"}
+        return {"removed": 0, "message": L("ничего не найдено", "nothing found")}
     if len(matches) > 1 and not all_matches:
         return {
             "removed": 0,
-            "message": f"совпадений: {len(matches)} — уточни текст или передай all_matches=true",
+            "message": L(
+                f"совпадений: {len(matches)} — уточни текст или передай all_matches=true",
+                f"matches: {len(matches)} — make the text more specific or pass all_matches=true",
+            ),
             "candidates": [f"{rel_to_home(p)}: {one_line(b, 160)}" for p, _, _, b in matches[:8]],
         }
     trash = STATE_DIR / "forgotten.md"
@@ -1325,7 +1372,8 @@ def forget(text: str, scope: str = "curated", all_matches: bool = False) -> Dict
         lines = read_text(path).splitlines()
         for start, end, block in sorted(blocks, reverse=True):
             del lines[start:end]
-            append_text(trash, f"- {now_local():%Y-%m-%d %H:%M} из {rel_to_home(path)}:\n  {block.replace(chr(10), chr(10) + '  ')}\n")
+            stamp, origin = f"{now_local():%Y-%m-%d %H:%M}", rel_to_home(path)
+            append_text(trash, L(f"- {stamp} из {origin}:\n", f"- {stamp} from {origin}:\n") + f"  {block.replace(chr(10), chr(10) + '  ')}\n")
         atomic_write(path, "\n".join(lines).rstrip("\n") + "\n")
     try_sync(only=list(by_file), max_seconds=60)
     return {"removed": len(matches), "files": [rel_to_home(p) for p in by_file], "trash": rel_to_home(trash)}
@@ -1359,11 +1407,22 @@ def recent_notes(days: int = 7, limit: int = 12) -> List[str]:
 def build_session_context(limit: int = MEMORY_CONTEXT_LIMIT) -> str:
     parts = [
         "<extended_memory>",
-        "Это расширенная память пользователя между сессиями (MCP-сервер extended-memory).",
-        "Ниже главная память (MEMORY.md) и последние записи дневника. Остальное — дневники, история прошлых "
-        "сессий, подключённые папки — ищи через memory_search, подробности открывай через memory_show.",
-        "Долговечное сохраняй: memory_remember (дневник), memory_curate (главная память, коротко и без дублей). "
-        "Секреты не сохраняй никогда.",
+        L(
+            "Это расширенная память пользователя между сессиями (MCP-сервер extended-memory).",
+            "This is the user's extended memory between sessions (the extended-memory MCP server).",
+        ),
+        L(
+            "Ниже главная память (MEMORY.md) и последние записи дневника. Остальное — дневники, история прошлых "
+            "сессий, подключённые папки — ищи через memory_search, подробности открывай через memory_show.",
+            "Below are the main memory (MEMORY.md) and the recent journal entries. For everything else — journals, the "
+            "history of past sessions, connected folders — use memory_search, and open the details with memory_show.",
+        ),
+        L(
+            "Долговечное сохраняй: memory_remember (дневник), memory_curate (главная память, коротко и без дублей). "
+            "Секреты не сохраняй никогда.",
+            "Save lasting knowledge: memory_remember (journal), memory_curate (main memory, short and without duplicates). "
+            "Never save secrets.",
+        ),
         "",
     ]
     if MEMORY_FILE.exists():
@@ -1371,11 +1430,14 @@ def build_session_context(limit: int = MEMORY_CONTEXT_LIMIT) -> str:
         body = "\n".join(line for line in body.splitlines() if line.strip() not in ("-", "- ")).strip()
         body = re.sub(r"\n{3,}", "\n\n", body)
         if len(body) > limit:
-            body = body[:limit].rsplit("\n", 1)[0] + "\n… (MEMORY.md обрезан — остальное найдётся через memory_search)"
+            body = body[:limit].rsplit("\n", 1)[0] + L(
+                "\n… (MEMORY.md обрезан — остальное найдётся через memory_search)",
+                "\n… (MEMORY.md is cut off — the rest can be found with memory_search)",
+            )
         parts += ["=== MEMORY.md ===", redact(body), ""]
     notes = recent_notes()
     if notes:
-        parts += ["=== Последние записи дневника ===", *[redact(n) for n in notes], ""]
+        parts += [L("=== Последние записи дневника ===", "=== Recent journal entries ==="), *[redact(n) for n in notes], ""]
     parts.append("</extended_memory>")
     return "\n".join(parts)
 
@@ -1461,9 +1523,12 @@ def is_significant(user: str, assistant: str, need_signal: bool = True) -> bool:
 def format_turn(when: dt.datetime, cwd: str, user: str, assistant: str) -> str:
     project = Path(cwd).name if cwd else ""
     where = f" · `{project}`" if project else ""
-    user_line = one_line(redact(user), 500) or "(запрос не найден)"
+    user_line = one_line(redact(user), 500) or L("(запрос не найден)", "(request not found)")
     result_line = one_line(redact(assistant), 900)
-    return f"- {when:%H:%M}{where} · запрос: {user_line}\n  итог: {result_line}\n"
+    return L(
+        f"- {when:%H:%M}{where} · запрос: {user_line}\n  итог: {result_line}\n",
+        f"- {when:%H:%M}{where} · request: {user_line}\n  result: {result_line}\n",
+    )
 
 
 def append_turn(folder: Path, when: dt.datetime, cwd: str, user: str, assistant: str, kind: str) -> Path:
@@ -1573,7 +1638,8 @@ def import_codex_history(days: int = 120, codex_home: Optional[str] = None, dry_
                 skipped += 1
                 continue
             if not dry_run:
-                touched.add(append_turn(HISTORY_DIR, turn["when"], turn["cwd"], turn["user"], turn["assistant"], "История Codex"))
+                kind = L("История Codex", "Codex history")
+                touched.add(append_turn(HISTORY_DIR, turn["when"], turn["cwd"], turn["user"], turn["assistant"], kind))
             imported += 1
     if not dry_run:
         _save_id_state("imported-turns.json", {"turns": known})
@@ -1598,12 +1664,12 @@ def _sort_day_file(path: Path) -> None:
 def add_folder(folder: str, prefix: Optional[str] = None, exts: Optional[str] = None) -> Dict[str, Any]:
     path = Path(os.path.expanduser(folder)).resolve()
     if not path.exists():
-        raise ValueError(f"нет такой папки или файла: {path}")
+        raise ValueError(L(f"нет такой папки или файла: {path}", f"no such folder or file: {path}"))
     config = load_config()
     stored = rel_to_home(path)
     for root in config.get("roots", []):
         if expand_path(root.get("path", "")) == path:
-            return {"added": False, "message": "уже подключена", "path": stored}
+            return {"added": False, "message": L("уже подключена", "already added"), "path": stored}
     taken = {str(r.get("logicalPrefix", "")) for r in config.get("roots", [])}
     base = (prefix or f"notes/{path.name}").strip("/")
     name, n = base, 2
@@ -1623,7 +1689,7 @@ def remove_folder(folder: str) -> Dict[str, Any]:
     before = len(config.get("roots", []))
     config["roots"] = [r for r in config.get("roots", []) if expand_path(r.get("path", "")) != path]
     if len(config["roots"]) == before:
-        return {"removed": False, "message": "такой папки нет в списке"}
+        return {"removed": False, "message": L("такой папки нет в списке", "this folder is not in the list")}
     save_config(config)
     return {"removed": True}
 
@@ -1653,7 +1719,7 @@ def set_embeddings(state: str, model: Optional[str] = None, endpoint: Optional[s
     if emb["enabled"]:
         probe = Embedder(config)
         try:
-            probe.embed(["проверка"])
+            probe.embed([L("проверка", "check")])
             result["check"] = "ok"
         except Exception as exc:
             result["check"] = str(exc)
@@ -1692,28 +1758,52 @@ def status() -> Dict[str, Any]:
 def format_status(info: Dict[str, Any]) -> str:
     size_mb = info["db_bytes"] / 1024 / 1024
     semantic = (
-        f"включён ({info['embedding_model']})" if info["embedding_enabled"] else "выключен — поиск только по словам"
+        L(f"включён ({info['embedding_model']})", f"on ({info['embedding_model']})")
+        if info["embedding_enabled"]
+        else L("выключен — поиск только по словам", "off — keyword search only")
     )
+    last_sync = info["last_sync"] or L("ещё не было", "not yet")
     lines = [
-        f"Расширенная память v{info['version']} — {rel_to_home(Path(info['home']))}",
-        f"Файлов в индексе: {info['files']}, фрагментов: {info['chunks']}, с векторами: {info['embeddings']} ({size_mb:.1f} МБ)",
-        f"Последняя синхронизация: {info['last_sync'] or 'ещё не было'}",
-        f"Смысловой поиск: {semantic}",
-        f"MEMORY.md: {info['memory_md_chars']} символов (в сессию попадает до {MEMORY_CONTEXT_LIMIT})",
+        L(
+            f"Расширенная память v{info['version']} — {rel_to_home(Path(info['home']))}",
+            f"Extended memory v{info['version']} — {rel_to_home(Path(info['home']))}",
+        ),
+        L(
+            f"Файлов в индексе: {info['files']}, фрагментов: {info['chunks']}, с векторами: {info['embeddings']} ({size_mb:.1f} МБ)",
+            f"Files in the index: {info['files']}, fragments: {info['chunks']}, with vectors: {info['embeddings']} ({size_mb:.1f} MB)",
+        ),
+        L(f"Последняя синхронизация: {last_sync}", f"Last sync: {last_sync}"),
+        L(f"Смысловой поиск: {semantic}", f"Semantic search: {semantic}"),
+        L(
+            f"MEMORY.md: {info['memory_md_chars']} символов (в сессию попадает до {MEMORY_CONTEXT_LIMIT})",
+            f"MEMORY.md: {info['memory_md_chars']} characters (a session gets up to {MEMORY_CONTEXT_LIMIT})",
+        ),
     ]
     if info["embedding_enabled"] and info["embeddings"] < info["chunks"]:
-        lines.append(f"Векторы досчитываются: {info['embeddings']}/{info['chunks']}")
+        lines.append(L(
+            f"Векторы досчитываются: {info['embeddings']}/{info['chunks']}",
+            f"Vectors are still being computed: {info['embeddings']}/{info['chunks']}",
+        ))
     if info.get("last_embedding_error"):
-        lines.append(f"Последняя ошибка эмбеддингов: {one_line(info['last_embedding_error'], 200)}")
-    lines.append("Что индексируется:")
+        lines.append(L(
+            f"Последняя ошибка эмбеддингов: {one_line(info['last_embedding_error'], 200)}",
+            f"Last embedding error: {one_line(info['last_embedding_error'], 200)}",
+        ))
+    lines.append(L("Что индексируется:", "What is indexed:"))
     for root in info["roots"]:
-        mark = "" if root["exists"] else "  (нет на диске)"
+        mark = "" if root["exists"] else L("  (нет на диске)", "  (not on disk)")
         lines.append(f"  - {root['path']} → {root['prefix']}{mark}")
     return "\n".join(lines)
 
 
 def _codex_home() -> Path:
     return Path(os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex"))
+
+
+def _language() -> Tuple[str, str]:
+    """Название текущего языка и код второго — для подсказки «сменить: memory lang …»."""
+    lang = i18n.current()
+    return i18n.NAMES[lang], ("ru" if lang == "en" else "en")
 
 
 def doctor() -> Tuple[List[Tuple[bool, str]], bool]:
@@ -1723,44 +1813,74 @@ def doctor() -> Tuple[List[Tuple[bool, str]], bool]:
     try:
         mem = sqlite3.connect(":memory:")
         mem.execute("CREATE VIRTUAL TABLE t USING fts5(x)")
-        checks.append((True, f"SQLite {sqlite3.sqlite_version} с FTS5"))
+        checks.append((True, L(f"SQLite {sqlite3.sqlite_version} с FTS5", f"SQLite {sqlite3.sqlite_version} with FTS5")))
     except sqlite3.Error as exc:
-        checks.append((False, f"в SQLite нет FTS5: {exc} — поставьте Python из Homebrew или python.org"))
-    checks.append((MEMORY_FILE.exists(), f"главная память {rel_to_home(MEMORY_FILE)}"))
+        checks.append((False, L(
+            f"в SQLite нет FTS5: {exc} — поставьте Python из Homebrew или python.org",
+            f"SQLite has no FTS5: {exc} — install Python from Homebrew or python.org",
+        )))
+    checks.append((MEMORY_FILE.exists(), L(f"главная память {rel_to_home(MEMORY_FILE)}", f"main memory {rel_to_home(MEMORY_FILE)}")))
+    name, other = _language()
+    checks.append((True, L(f"язык: {name} (сменить: memory lang {other})", f"language: {name} (switch: memory lang {other})")))
     config = load_config()
     emb = config.get("embedding") or {}
     if emb.get("enabled"):
         models = ollama_models(str(emb.get("endpoint", DEFAULT_ENDPOINT)))
         if "/api/" in str(emb.get("endpoint", "")) and models is None:
-            checks.append((False, "Ollama не отвечает на 127.0.0.1:11434 — запустите Ollama (иначе поиск только по словам)"))
+            checks.append((False, L(
+                "Ollama не отвечает на 127.0.0.1:11434 — запустите Ollama (иначе поиск только по словам)",
+                "Ollama is not responding at 127.0.0.1:11434 — start Ollama (otherwise keyword search only)",
+            )))
         else:
             probe = Embedder(config)
             try:
-                probe.embed(["проверка связи"])
-                checks.append((True, f"эмбеддинги работают ({probe.model})"))
+                probe.embed([L("проверка связи", "connection check")])
+                checks.append((True, L(f"эмбеддинги работают ({probe.model})", f"embeddings work ({probe.model})")))
             except Exception as exc:
-                checks.append((False, f"эмбеддинги: {one_line(str(exc), 200)}"))
+                checks.append((False, L(f"эмбеддинги: {one_line(str(exc), 200)}", f"embeddings: {one_line(str(exc), 200)}")))
     else:
-        checks.append((True, "смысловой поиск выключен (включить: memory embeddings on)"))
+        checks.append((True, L(
+            "смысловой поиск выключен (включить: memory embeddings on)",
+            "semantic search is off (turn it on: memory embeddings on)",
+        )))
     info = status()
-    checks.append((info["files"] > 0, f"индекс: файлов {info['files']}, фрагментов {info['chunks']}, векторов {info['embeddings']}"))
+    checks.append((info["files"] > 0, L(
+        f"индекс: файлов {info['files']}, фрагментов {info['chunks']}, векторов {info['embeddings']}",
+        f"index: files {info['files']}, fragments {info['chunks']}, vectors {info['embeddings']}",
+    )))
     codex = _codex_home()
     config_toml = codex / "config.toml"
     toml_text = read_text(config_toml) if config_toml.exists() else ""
-    checks.append((f"[mcp_servers.{SERVER_NAME}]" in toml_text, f"MCP-сервер прописан в {rel_to_home(config_toml)}"))
+    checks.append((f"[mcp_servers.{SERVER_NAME}]" in toml_text, L(
+        f"MCP-сервер прописан в {rel_to_home(config_toml)}",
+        f"MCP server is registered in {rel_to_home(config_toml)}",
+    )))
     agents = codex / "AGENTS.md"
-    checks.append((agents.exists() and "extended-memory:start" in read_text(agents), f"инструкции в {rel_to_home(agents)}"))
+    checks.append((agents.exists() and "extended-memory:start" in read_text(agents), L(
+        f"инструкции в {rel_to_home(agents)}",
+        f"instructions in {rel_to_home(agents)}",
+    )))
     hooks = codex / "hooks.json"
     hooks_text = read_text(hooks) if hooks.exists() else ""
     if "hook_session_start.py" in hooks_text or "hook_stop.py" in hooks_text:
         runs = _load_id_state("hook-runs.json")
-        for event, title in (("SessionStart", "хук начала сессии"), ("Stop", "хук автосохранения")):
+        titles = (
+            ("SessionStart", L("хук начала сессии", "session start hook")),
+            ("Stop", L("хук автосохранения", "auto-record hook")),
+        )
+        for event, title in titles:
             if runs.get(event):
-                checks.append((True, f"{title}: последний запуск {runs[event]}"))
+                checks.append((True, L(f"{title}: последний запуск {runs[event]}", f"{title}: last run {runs[event]}")))
             else:
-                checks.append((False, f"{title} ещё не запускался — откройте Кодекс и подтвердите доверие хукам (Trust)"))
+                checks.append((False, L(
+                    f"{title} ещё не запускался — откройте Кодекс и подтвердите доверие хукам (Trust)",
+                    f"{title} has not run yet — open Codex and trust the hooks (Trust)",
+                )))
     else:
-        checks.append((True, "хуки не установлены (ставились с --no-hooks)"))
+        checks.append((True, L(
+            "хуки не установлены (ставились с --no-hooks)",
+            "hooks are not installed (the package was installed with --no-hooks)",
+        )))
     return checks, all(ok for ok, _ in checks)
 
 
@@ -1795,68 +1915,102 @@ def _print_json(data: Any) -> None:
 
 def _sync_phrase(result: Dict[str, Any]) -> str:
     if result.get("busy"):
-        return "индекс обновляется фоновой задачей"
+        return L("индекс обновляется фоновой задачей", "the index is being updated by a background task")
     if not result.get("ok"):
-        return f"индекс обновится позже: {result.get('error')}"
+        return L(f"индекс обновится позже: {result.get('error')}", f"the index will be updated later: {result.get('error')}")
     if result.get("embedding_error"):
-        return "проиндексировано по словам, векторы догонят позже"
-    return "проиндексировано"
+        return L("проиндексировано по словам, векторы догонят позже", "indexed by keywords, the vectors will catch up later")
+    return L("проиндексировано", "indexed")
+
+
+def set_language(value: str) -> int:
+    """Команда lang: сохраняет язык и переписывает на нём инструкции для агента в настройках Кодекса."""
+    code = i18n.normalize(value)
+    if code is None:
+        raise ValueError(L(f"неизвестный язык: {value} (есть ru и en)", f"unknown language: {value} (use ru or en)"))
+    i18n.save(code, HOME_DIR)
+    i18n.use(code)  # дальше сообщения идут уже на новом языке
+    script = APP_DIR / "configure_codex.py"
+    updated = False
+    if script.is_file():
+        command = [sys.executable, str(script), "relang", "--lang", code,
+                   "--mem-home", str(HOME_DIR), "--codex-home", str(_codex_home())]
+        print(end="", flush=True)  # подпроцесс печатает свои строки сам: наши уже напечатанные должны встать раньше
+        try:
+            updated = subprocess.run(command, stdin=subprocess.DEVNULL).returncode == 0
+        except OSError:
+            updated = False
+    if not updated:
+        warn(L(
+            "предупреждение: язык сохранён, но инструкции для агента в AGENTS.md Кодекса не обновлены — "
+            "запустите установщик ещё раз",
+            "warning: the language is saved, but the agent instructions in the Codex AGENTS.md were not updated — "
+            "run the installer again",
+        ))
+    print(L(
+        f"Язык памяти: {i18n.NAMES[code]}. Перезапустите Кодекс, чтобы сессии получили инструкции на новом языке.",
+        f"Memory language: {i18n.NAMES[code]}. Restart Codex so that sessions pick up the instructions in the new language.",
+    ))
+    return 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     fix_stdio()
-    parser = argparse.ArgumentParser(prog="memory", description="Расширенная память для Codex")
+    parser = argparse.ArgumentParser(prog="memory", description=L("Расширенная память для Codex", "Extended memory for Codex"))
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    sub = parser.add_subparsers(dest="cmd", metavar="команда")
+    sub = parser.add_subparsers(dest="cmd", metavar=L("команда", "command"))
     sub.required = True
 
     def cmd(name: str, help_text: str) -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help_text, description=help_text)
-        p.add_argument("--json", action="store_true", help="вывод в JSON")
+        p.add_argument("--json", action="store_true", help=L("вывод в JSON", "output as JSON"))
         return p
 
-    cmd("status", "состояние индекса")
-    p = cmd("sync", "обновить индекс")
+    cmd("status", L("состояние индекса", "index status"))
+    p = cmd("sync", L("обновить индекс", "update the index"))
     p.add_argument("--quiet", action="store_true")
-    p.add_argument("--text-only", action="store_true", help="без векторов (быстро)")
-    p.add_argument("--only", action="append", help="обновить только этот файл (можно несколько)")
+    p.add_argument("--text-only", action="store_true", help=L("без векторов (быстро)", "without vectors (fast)"))
+    p.add_argument("--only", action="append", help=L("обновить только этот файл (можно несколько)", "update only this file (can be repeated)"))
     p.add_argument("--max-seconds", type=float)
-    p = cmd("search", "поиск по памяти")
+    p = cmd("search", L("поиск по памяти", "search the memory"))
     p.add_argument("query", nargs="+")
     p.add_argument("--limit", type=int, default=8)
-    p = cmd("show", "показать строки файла из памяти")
+    p = cmd("show", L("показать строки файла из памяти", "show lines of a file from the memory"))
     p.add_argument("path")
     p.add_argument("start", type=int, nargs="?", default=1)
     p.add_argument("end", type=int, nargs="?")
-    p = cmd("remember", "записать факт в дневник")
+    p = cmd("remember", L("записать факт в дневник", "write a fact to the journal"))
     p.add_argument("note", nargs="+")
     p.add_argument("--source")
-    p = cmd("curate", "записать факт в главную память MEMORY.md")
+    p = cmd("curate", L("записать факт в главную память MEMORY.md", "write a fact to the main memory MEMORY.md"))
     p.add_argument("note", nargs="+")
     p.add_argument("--category", default="other", choices=sorted(CATEGORY_LABELS))
     p.add_argument("--source")
-    p = cmd("forget", "удалить пункт памяти по фрагменту текста")
+    p = cmd("forget", L("удалить пункт памяти по фрагменту текста", "delete a memory item by a fragment of its text"))
     p.add_argument("text", nargs="+")
-    p.add_argument("--all-files", action="store_true", help="искать и в дневниках, не только в MEMORY.md")
-    p.add_argument("--all-matches", action="store_true", help="удалить все совпадения")
-    cmd("maintain", "чистка секретов и дублей + синхронизация")
-    p = cmd("import-codex-history", "загрузить в память прошлые сессии Кодекса")
+    p.add_argument("--all-files", action="store_true", help=L("искать и в дневниках, не только в MEMORY.md", "search the journals too, not only MEMORY.md"))
+    p.add_argument("--all-matches", action="store_true", help=L("удалить все совпадения", "delete all matches"))
+    cmd("maintain", L("чистка секретов и дублей + синхронизация", "scrub secrets and duplicates + sync"))
+    p = cmd("import-codex-history", L("загрузить в память прошлые сессии Кодекса", "load past Codex sessions into the memory"))
     p.add_argument("--days", type=int, default=120)
     p.add_argument("--codex-home")
     p.add_argument("--dry-run", action="store_true")
-    p = cmd("add-folder", "подключить папку с заметками к поиску")
+    p = cmd("add-folder", L("подключить папку с заметками к поиску", "add a notes folder to search"))
     p.add_argument("folder")
     p.add_argument("--prefix")
-    p.add_argument("--ext", help="расширения через запятую, по умолчанию .md,.txt")
-    p = cmd("remove-folder", "отключить папку от поиска")
+    p.add_argument("--ext", help=L("расширения через запятую, по умолчанию .md,.txt", "comma-separated extensions, .md,.txt by default"))
+    p = cmd("remove-folder", L("отключить папку от поиска", "remove a folder from search"))
     p.add_argument("folder")
-    p = cmd("embeddings", "включить/выключить смысловой поиск")
+    p = cmd("embeddings", L("включить/выключить смысловой поиск", "turn semantic search on or off"))
     p.add_argument("state", choices=["on", "off"])
     p.add_argument("--model")
     p.add_argument("--endpoint")
-    p = cmd("context", "показать, что подмешивается в начало сессии")
+    p = cmd("context", L("показать, что подмешивается в начало сессии", "show what is added to the start of a session"))
     p.add_argument("--max-chars", type=int, default=MEMORY_CONTEXT_LIMIT)
-    cmd("doctor", "проверить установку")
+    cmd("doctor", L("проверить установку", "check the installation"))
+    lang_help = L("показать или сменить язык памяти: ru или en", "show or switch the memory language: ru or en")
+    p = sub.add_parser("lang", help=lang_help, description=lang_help)
+    p.add_argument("code", nargs="?", metavar="ru|en", help=L("новый язык; без него — показать текущий", "the new language; without it, show the current one"))
 
     args = parser.parse_args(argv)
     as_json = bool(getattr(args, "json", False))
@@ -1872,17 +2026,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if as_json:
                     _print_json({"busy": True})
                 elif not args.quiet:
-                    print("Индекс уже обновляется другим процессом — пропускаю.")
+                    print(L(
+                        "Индекс уже обновляется другим процессом — пропускаю.",
+                        "The index is already being updated by another process — skipping.",
+                    ))
                 return 0
             if as_json:
                 _print_json(result)
             elif not args.quiet:
-                print(
+                print(L(
                     f"Готово за {result['seconds']} с: файлов {result['files']}, обновлено {result['updated']}, "
-                    f"удалено {result['removed']}, фрагментов {result['chunks']}, векторов {result['embeddings']}."
-                )
+                    f"удалено {result['removed']}, фрагментов {result['chunks']}, векторов {result['embeddings']}.",
+                    f"Done in {result['seconds']} s: files {result['files']}, updated {result['updated']}, "
+                    f"removed {result['removed']}, fragments {result['chunks']}, vectors {result['embeddings']}.",
+                ))
             if result.get("embedding_error") and not text_only_requested(args):
-                warn(f"эмбеддинги: {result['embedding_error']}")
+                warn(L(f"эмбеддинги: {result['embedding_error']}", f"embeddings: {result['embedding_error']}"))
         elif args.cmd == "search":
             payload = search(" ".join(args.query), args.limit)
             _print_json(payload) if as_json else print(format_search(payload))
@@ -1895,9 +2054,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if as_json:
                 _print_json(result)
             elif result.get("saved"):
-                print(f"Сохранено в {rel_to_home(Path(result['path']))} ({_sync_phrase(result['sync'])}).")
+                print(L(
+                    f"Сохранено в {rel_to_home(Path(result['path']))} ({_sync_phrase(result['sync'])}).",
+                    f"Saved to {rel_to_home(Path(result['path']))} ({_sync_phrase(result['sync'])}).",
+                ))
             else:
-                print("Такой пункт в сегодняшнем дневнике уже есть.")
+                print(L("Такой пункт в сегодняшнем дневнике уже есть.", "Today's journal already has this item."))
         elif args.cmd == "curate":
             result = curate(" ".join(args.note), args.category, args.source)
             if result.get("saved"):
@@ -1905,19 +2067,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if as_json:
                 _print_json(result)
             elif result.get("saved"):
-                print(f"Добавлено в {rel_to_home(MEMORY_FILE)} ({_sync_phrase(result['sync'])}).")
+                print(L(
+                    f"Добавлено в {rel_to_home(MEMORY_FILE)} ({_sync_phrase(result['sync'])}).",
+                    f"Added to {rel_to_home(MEMORY_FILE)} ({_sync_phrase(result['sync'])}).",
+                ))
                 if result.get("warning"):
-                    print(f"Внимание: {result['warning']}")
+                    print(L(f"Внимание: {result['warning']}", f"Note: {result['warning']}"))
             else:
-                print("Такой факт в MEMORY.md уже есть.")
+                print(L("Такой факт в MEMORY.md уже есть.", "MEMORY.md already has this fact."))
         elif args.cmd == "forget":
             result = forget(" ".join(args.text), "all" if args.all_files else "curated", args.all_matches)
             if as_json:
                 _print_json(result)
             elif result.get("removed"):
-                print(f"Удалено пунктов: {result['removed']} ({', '.join(result['files'])}). Копия — в {result['trash']}.")
+                print(L(
+                    f"Удалено пунктов: {result['removed']} ({', '.join(result['files'])}). Копия — в {result['trash']}.",
+                    f"Items deleted: {result['removed']} ({', '.join(result['files'])}). A copy is in {result['trash']}.",
+                ))
             else:
-                print(f"Ничего не удалено: {result.get('message')}.")
+                print(L(f"Ничего не удалено: {result.get('message')}.", f"Nothing deleted: {result.get('message')}."))
                 for candidate in result.get("candidates", []):
                     print(f"  - {candidate}")
         elif args.cmd == "maintain":
@@ -1925,41 +2093,59 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if as_json:
                 _print_json(result)
             else:
-                print(
+                print(L(
                     f"Почищено файлов: {result['changed_files']}, убрано дублей: {result['removed_duplicates']}; "
-                    f"{_sync_phrase(result['sync'])}."
-                )
+                    f"{_sync_phrase(result['sync'])}.",
+                    f"Files cleaned: {result['changed_files']}, duplicates removed: {result['removed_duplicates']}; "
+                    f"{_sync_phrase(result['sync'])}.",
+                ))
         elif args.cmd == "import-codex-history":
             result = import_codex_history(args.days, args.codex_home, args.dry_run)
             if as_json:
                 _print_json(result)
             else:
-                verb = "нашлось бы" if args.dry_run else "загружено"
-                print(
+                verb = L("нашлось бы", "that would be loaded") if args.dry_run else L("загружено", "loaded")
+                print(L(
                     f"Сессий за {args.days} дн.: {result['sessions']}; {verb} значимых ходов: {result['imported']} "
-                    f"(пропущено мелких и повторов: {result['skipped']})."
-                )
+                    f"(пропущено мелких и повторов: {result['skipped']}).",
+                    f"Sessions in the last {args.days} days: {result['sessions']}; significant turns {verb}: {result['imported']} "
+                    f"(minor and repeated ones skipped: {result['skipped']}).",
+                ))
         elif args.cmd == "add-folder":
             result = add_folder(args.folder, args.prefix, args.ext)
             if as_json:
                 _print_json(result)
             elif result.get("added"):
-                print(f"Подключено: {result['path']} → {result['prefix']}. Индекс обновится сам (или сразу: memory sync).")
+                print(L(
+                    f"Подключено: {result['path']} → {result['prefix']}. Индекс обновится сам (или сразу: memory sync).",
+                    f"Added: {result['path']} → {result['prefix']}. The index will update on its own (or right now: memory sync).",
+                ))
             else:
-                print(f"Уже подключено: {result['path']}.")
+                print(L(f"Уже подключено: {result['path']}.", f"Already added: {result['path']}."))
         elif args.cmd == "remove-folder":
             result = remove_folder(args.folder)
-            _print_json(result) if as_json else print("Отключено." if result.get("removed") else "Такой папки нет в списке.")
+            if as_json:
+                _print_json(result)
+            elif result.get("removed"):
+                print(L("Отключено.", "Removed."))
+            else:
+                print(L("Такой папки нет в списке.", "This folder is not in the list."))
         elif args.cmd == "embeddings":
             result = set_embeddings(args.state, args.model, args.endpoint)
             if as_json:
                 _print_json(result)
             elif not result["enabled"]:
-                print("Смысловой поиск выключен: ищу только по словам.")
+                print(L("Смысловой поиск выключен: ищу только по словам.", "Semantic search is off: searching by keywords only."))
             elif result.get("check") == "ok":
-                print(f"Смысловой поиск включён ({result['model']}), проверка прошла.")
+                print(L(
+                    f"Смысловой поиск включён ({result['model']}), проверка прошла.",
+                    f"Semantic search is on ({result['model']}), the check passed.",
+                ))
             else:
-                print(f"Смысловой поиск включён ({result['model']}), но проверка не прошла: {result.get('check')}")
+                print(L(
+                    f"Смысловой поиск включён ({result['model']}), но проверка не прошла: {result.get('check')}",
+                    f"Semantic search is on ({result['model']}), but the check failed: {result.get('check')}",
+                ))
             if result["enabled"] and result.get("check") != "ok":
                 return 3
         elif args.cmd == "context":
@@ -1972,13 +2158,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 for ok, text in checks:
                     print(f"{'✓' if ok else '✗'} {text}")
                 print(
-                    "\nВсё в порядке."
+                    L("\nВсё в порядке.", "\nAll good.")
                     if healthy
-                    else "\nЕсть что поправить — см. строки с ✗ и раздел «Если что-то не работает» в README."
+                    else L(
+                        "\nЕсть что поправить — см. строки с ✗ и раздел «Если что-то не работает» в README.",
+                        "\nSomething needs fixing — see the lines with ✗ and the \"Troubleshooting\" section in the README.",
+                    )
                 )
             return 0 if healthy else 1
+        elif args.cmd == "lang":
+            if args.code:
+                return set_language(args.code)
+            name, other = _language()
+            print(L(f"Язык: {name}. Сменить: memory lang {other}", f"Language: {name}. Switch: memory lang {other}"))
     except (ValueError, OSError, sqlite3.Error) as exc:
-        warn(f"ошибка: {exc}")
+        warn(L(f"ошибка: {exc}", f"error: {exc}"))
         return 1
     return 0
 

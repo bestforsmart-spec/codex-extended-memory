@@ -106,10 +106,53 @@ check("pythonw: нет рядом — берём python", sw.pythonw_for("/no/su
 # 5. Движок
 import hybrid_memory as hm  # noqa: E402
 
-check("версия 1.1.0", hm.VERSION == "1.1.0", hm.VERSION)
+check("версия 1.2.0", hm.VERSION == "1.2.0", hm.VERSION)
 check("свой процесс жив", hm._pid_alive(os.getpid()))
 check("несуществующий процесс мёртв", not hm._pid_alive(2 ** 22 + 12345))
 check("путь от дома через /", hm.rel_to_home(pathlib.Path.home() / "a" / "b.md") == "~/a/b.md")
+check("раздел главной памяти узнаётся на обоих языках",
+      tuple(hm.CURATED_SECTIONS) == ("## Активная память", "## Active memory"), str(getattr(hm, "CURATED_SECTIONS", None)))
+
+# 6. Язык: выбор при установке, шаблоны, метки в настройках Кодекса
+import i18n  # noqa: E402
+
+got = [i18n.normalize(x) for x in ("RU", "en-US", "ru_RU.UTF-8", "C.UTF-8", "de_DE", "english", "")]
+check("язык: разбор значений", got == ["ru", "en", "ru", None, None, "en", None], str(got))
+saved_env = {key: os.environ.pop(key, None) for key in ("CODEX_MEMORY_LANG", "LC_ALL", "LC_MESSAGES", "LANG")}
+lang_home = tmp / "lang-home"
+lang_home.mkdir(parents=True, exist_ok=True)
+os.environ["LANG"] = "de_DE.UTF-8"
+check("язык установки: система не русская — английский", i18n.pick_for_install(None, lang_home, legacy=False) == "en")
+os.environ["LANG"] = "ru_RU.UTF-8"
+check("язык установки: русская система — русский", i18n.pick_for_install(None, lang_home, legacy=False) == "ru")
+os.environ["LANG"] = "en_US.UTF-8"
+check("язык установки: память старше 1.2.0 остаётся русской", i18n.pick_for_install(None, lang_home, legacy=True) == "ru")
+i18n.save("en", lang_home)
+check("язык установки: сохранённый выбор важнее", i18n.saved(lang_home) == "en" and i18n.pick_for_install(None, lang_home, legacy=True) == "en")
+check("язык установки: флаг важнее сохранённого", i18n.pick_for_install("ru", lang_home, legacy=False) == "ru")
+os.environ["CODEX_MEMORY_LANG"] = "ru"
+check("язык установки: переменная среды важнее сохранённого", i18n.pick_for_install(None, lang_home, legacy=False) == "ru")
+for key, value in saved_env.items():
+    os.environ.pop(key, None)
+    if value is not None:
+        os.environ[key] = value
+
+for code in i18n.SUPPORTED:
+    for name in ("AGENTS-block.md", "MEMORY.md"):
+        check(f"шаблон {code}/{name}", (app / "templates" / code / name).is_file())
+for begin in cc.TOML_BEGINS:
+    sample = f'a = 1\n{begin}\n[mcp_servers.extended-memory]\ncommand = "x"\n{cc.TOML_END}\n[other]\nb = 2\n'
+    cleaned = cc.remove_server_block(sample)
+    check("TOML: наш кусок убирается по метке на любом языке",
+          "extended-memory" not in cleaned and "[other]" in cleaned and "a = 1" in cleaned, cleaned)
+i18n.use("en")
+english = cc.toml_begin() + " " + " ".join(item[3] for item in cc.hooks_spec())
+check("английский: метка в config.toml и подписи хуков без кириллицы",
+      not any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in english), english)
+check("английский: L() отдаёт английский текст", i18n.L("да", "yes") == "yes")
+i18n.use("ru")
+check("русский: метка в config.toml прежняя", cc.toml_begin() == cc.TOML_BEGINS[0])
+check("русский: L() отдаёт русский текст", i18n.L("да", "yes") == "да")
 
 print("\nИТОГ:", "все проверки прошли" if not fails else f"не прошло: {len(fails)} — {fails}")
 sys.exit(1 if fails else 0)

@@ -4,11 +4,12 @@
 usage:
   live_checks.py prepare   --codex-home DIR
       кладёт поддельную сессию Кодекса, чтобы при установке проверилась загрузка истории
-  live_checks.py installed --memory-home DIR --codex-home DIR
+  live_checks.py installed --memory-home DIR --codex-home DIR [--lang ru|en]
                            [--install-log FILE] [--expect-codex] [--expect-schedule] [--expect-history]
                            [--expect-embeddings]
       проверяет установку: файлы, настройки Кодекса, командную строку, хуки (так, как их запускает
-      Кодекс), сервер MCP, замок индекса, фоновые задачи
+      Кодекс), сервер MCP, замок индекса, фоновые задачи, смену языка. Язык берётся из
+      <память>/.state/lang; с --lang дополнительно проверяется, что установщик выбрал именно его
   live_checks.py removed   --memory-home DIR --codex-home DIR [--purged]
       проверяет, что удаление убрало своё и оставило заметки
 
@@ -61,6 +62,47 @@ MCP_WORD = "Лаврентьева"
 SEMANTIC_NOTE = "Рассылку отправляем через SMTP-релей: при прямой отправке почта оседала в папке нежелательных сообщений."
 SEMANTIC_QUERY = "письма попадают в спам"
 SEMANTIC_MARK = "SMTP-релей"
+
+# Что память говорит на каждом из языков: по этим словам проверяется язык установки.
+TEXT: Dict[str, Dict[str, str]] = {
+    "ru": {
+        "status_files": "Файлов в индексе",
+        "status_title": "Расширенная память",
+        "saved": "Сохранено",
+        "context_word": "главная память",
+        "auto_label": "запрос:",
+        "doctor_ok": "Всё в порядке",
+        "doctor_emb": "эмбеддинги работают",
+        "doctor_lang": "язык: русский",
+        "lang_line": "Язык: русский",
+        "log_done": "Готово!",
+        "log_title": "Расширенная память для Кодекса",
+        "log_codex_ok": "Кодекс принял config.toml",
+        "log_no_codex": "проверено без Кодекса",
+        "agents_title": "## Расширенная память",
+        "memory_about": "## Обо мне",
+    },
+    "en": {
+        "status_files": "Files in the index",
+        "status_title": "Extended memory",
+        "saved": "Saved",
+        "context_word": "main memory",
+        "auto_label": "request:",
+        "doctor_ok": "All good",
+        "doctor_emb": "embeddings work",
+        "doctor_lang": "language: English",
+        "lang_line": "Language: English",
+        "log_done": "Done!",
+        "log_title": "Extended Memory for Codex",
+        "log_codex_ok": "Codex accepted config.toml",
+        "log_no_codex": "checked without Codex",
+        "agents_title": "## Extended memory",
+        "memory_about": "## About me",
+    },
+}
+LANG = "ru"
+T = TEXT[LANG]
+CYRILLIC = re.compile(r"[а-яёА-ЯЁ]")
 
 WINDOWS_ENV = (
     "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "USERPROFILE", "USERNAME", "USERDOMAIN",
@@ -258,11 +300,14 @@ def prepare(codex_home: Path) -> int:
 
 def check_layout(mem_home: Path) -> None:
     section("Файлы")
-    names = ["app/hybrid_memory.py", "app/mcp_server.py", "app/configure_codex.py", "app/templates/MEMORY.md",
-             "MEMORY.md", "README.md", "index-roots.json"]
+    names = ["app/hybrid_memory.py", "app/mcp_server.py", "app/configure_codex.py", "app/i18n.py",
+             "app/templates/ru/MEMORY.md", "app/templates/en/MEMORY.md",
+             "app/templates/ru/AGENTS-block.md", "app/templates/en/AGENTS-block.md",
+             "MEMORY.md", "README.md", "README.ru.md", "index-roots.json"]
     names += ["bin/memory.cmd", "uninstall.cmd", "app/run_task.py"] if IS_WINDOWS else ["bin/memory", "uninstall.sh"]
     for name in names:
         check(f"есть {name}", (mem_home / name).is_file())
+    check("MEMORY.md: разделы на языке установки", T["memory_about"] in read_text(mem_home / "MEMORY.md"))
     if IS_WINDOWS:
         data = (mem_home / "bin" / "memory.cmd").read_bytes()
         check("memory.cmd: только ASCII и CRLF", all(b < 128 for b in data) and b"\n" not in data.replace(b"\r\n", b""))
@@ -289,6 +334,7 @@ def check_codex_config(mem_home: Path, codex_home: Path) -> Dict[str, Any]:
     agents = read_text(codex_home / "AGENTS.md")
     check("AGENTS.md: блок инструкций", "<!-- extended-memory:start -->" in agents and "memory_search" in agents)
     check("AGENTS.md: путь к командной строке", str(cli_path(mem_home)) in agents)
+    check("AGENTS.md: инструкции на языке установки", T["agents_title"] in agents, short(agents, 200))
     return entry
 
 
@@ -310,12 +356,12 @@ def check_cli(mem_home: Path, codex_home: Path) -> None:
         status = {}
     check("memory status --json", code == 0 and status.get("files", 0) > 0, short(out + err))
     code, out, err = run_cli(mem_home, codex_home, "status")
-    check("memory status: русский текст без искажений", code == 0 and "Файлов в индексе" in out, short(out + err))
+    check("memory status: текст на языке установки, без искажений", code == 0 and T["status_files"] in out, short(out + err))
     code, out, err = run_cli(mem_home, codex_home, "--version")
     check("memory --version", code == 0 and re.search(r"\d+\.\d+\.\d+", out + err), short(out + err))
     info(short(out + err, 80))
     code, out, err = run_cli(mem_home, codex_home, "remember", "Проверочная запись: договор с «Альфой» продлён до марта")
-    check("memory remember с русским текстом и кавычками", code == 0 and "Сохранено" in out, short(out + err))
+    check("memory remember с русским текстом и кавычками", code == 0 and T["saved"] in out, short(out + err))
     code, out, err = run_cli(mem_home, codex_home, "search", "договор Альфа")
     check("memory search находит запись", code == 0 and "продлён до марта" in out, short(out + err))
 
@@ -334,7 +380,8 @@ def check_hooks(mem_home: Path, codex_home: Path) -> None:
         context = ""
         info(f"вывод хука: {short(start.stdout.decode('utf-8', 'replace'))} / {short(start.stderr.decode('utf-8', 'replace'))} ({exc})")
     check("SessionStart: код 0 и JSON в UTF-8", start.returncode == 0 and bool(context))
-    check("SessionStart: в контексте главная память", "<extended_memory>" in context and "память" in context, short(context, 200))
+    check("SessionStart: в контексте главная память, пояснение на языке установки",
+          "<extended_memory>" in context and T["context_word"] in context, short(context, 300))
 
     transcript = work / "rollout-live.jsonl"
     transcript.write_bytes((json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": STOP_USER}}, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -350,6 +397,7 @@ def check_hooks(mem_home: Path, codex_home: Path) -> None:
     check("Stop: автозапись создана", bool(auto))
     check("Stop: запрос и итог записаны по-русски без искажений", STOP_USER in text and "данные на месте" in text, short(text, 300))
     check("Stop: имя проекта из рабочей папки", f"`{STOP_PROJECT}`" in text, short(text, 300))
+    check("Stop: подписи автозаписи на языке установки", T["auto_label"] in text, short(text, 300))
 
     found = False
     deadline = time.time() + 90
@@ -369,10 +417,13 @@ def check_mcp(mem_home: Path, entry: Dict[str, Any]) -> None:
     check("перед проверкой индекс свободен", wait_no_lock(mem_home))
     first = open_client(entry, "client-a")
     info(f"сервер: {first.server_info}")  # type: ignore[attr-defined]
-    tools = [tool["name"] for tool in first.request("tools/list")["result"]["tools"]]
+    listing = first.request("tools/list")["result"]["tools"]
+    tools = [tool["name"] for tool in listing]
     check("семь инструментов memory_*", len(tools) == 7 and all(name.startswith("memory_") for name in tools), str(tools))
+    described = json.dumps(listing, ensure_ascii=False)
+    check("описания инструментов на языке установки", bool(CYRILLIC.search(described)) == (LANG == "ru"), short(described, 300))
     ok, text = first.tool("memory_remember", {"note": MCP_NOTE, "source": "живая проверка"})
-    check("клиент A записал факт", ok and "Сохранено" in text, short(text))
+    check("клиент A записал факт", ok and T["saved"] in text, short(text))
     first.close()
 
     second = open_client(entry, "client-b")
@@ -385,7 +436,7 @@ def check_mcp(mem_home: Path, entry: Dict[str, Any]) -> None:
             time.sleep(2)
     check("клиент B нашёл записанное клиентом A", found, short(text, 300))
     ok, text = second.tool("memory_status", {})
-    check("memory_status отвечает по-русски", ok and "Расширенная память" in text, short(text, 200))
+    check("memory_status отвечает на языке установки", ok and T["status_title"] in text, short(text, 200))
     second.close()
 
 
@@ -474,7 +525,7 @@ def check_schedule(mem_home: Path) -> None:
 def check_semantic(mem_home: Path, codex_home: Path) -> None:
     section("Поиск по смыслу (Ollama)")
     code, out, err = run_cli(mem_home, codex_home, "remember", SEMANTIC_NOTE)
-    check("запись для проверки смысла сохранена", code == 0 and "Сохранено" in out, short(out + err))
+    check("запись для проверки смысла сохранена", code == 0 and T["saved"] in out, short(out + err))
     status: Dict[str, Any] = {}
     deadline = time.time() + 1200
     while time.time() < deadline:
@@ -500,25 +551,68 @@ def check_doctor(mem_home: Path, codex_home: Path, embeddings: bool = False) -> 
     code, out, err = run_cli(mem_home, codex_home, "doctor")
     for line in out.splitlines():
         info(line)
-    check("memory doctor: всё в порядке", code == 0 and "Всё в порядке" in out, short(err))
+    check("memory doctor: всё в порядке", code == 0 and T["doctor_ok"] in out, short(err))
+    check("memory doctor: показывает язык", T["doctor_lang"] in out)
     if embeddings:
-        check("memory doctor: эмбеддинги работают", "эмбеддинги работают" in out)
+        check("memory doctor: эмбеддинги работают", T["doctor_emb"] in out)
 
 
 def check_install_log(path: Path, expect_codex: bool) -> None:
     section("Журнал установки")
     text = path.read_bytes().decode("utf-8", errors="replace")
-    check("установка дошла до конца", "Готово!" in text)
+    check("установка дошла до конца", T["log_done"] in text)
     check("в журнале нет ошибок Python", "Traceback" not in text)
-    check("в журнале нет искажённой кириллицы", "Расширенная память для Кодекса" in text)
+    check("заголовок на языке установки, текст не искажён", T["log_title"] in text)
+    if LANG == "en":
+        stray = [line.strip() for line in text.splitlines() if CYRILLIC.search(line) and HISTORY_PROJECT not in line]
+        check("английская установка: в журнале нет русских сообщений", not stray, short(" | ".join(stray[:5]), 400))
     if expect_codex:
-        check("настоящий Кодекс принял config.toml и видит сервер", "Кодекс принял config.toml" in text)
-    elif "проверено без Кодекса" in text:
+        check("настоящий Кодекс принял config.toml и видит сервер", T["log_codex_ok"] in text)
+    elif T["log_no_codex"] in text:
         info("Кодекса на машине нет: config.toml проверен без него")
 
 
+def check_switch(mem_home: Path, codex_home: Path) -> None:
+    section("Смена языка")
+    other = "en" if LANG == "ru" else "ru"
+    here, there = TEXT[LANG], TEXT[other]
+    state = mem_home / ".state" / "lang"
+    untouched = {name: (codex_home / name).read_bytes() for name in ("hooks.json", "config.toml")}
+    code, out, err = run_cli(mem_home, codex_home, "lang")
+    check("memory lang показывает текущий язык", code == 0 and here["lang_line"] in out, short(out + err))
+    code, out, err = run_cli(mem_home, codex_home, "lang", other)
+    info(short(out + err, 400))
+    check(f"memory lang {other}: код 0", code == 0, short(out + err))
+    check("выбор сохранён в .state/lang", read_text(state).strip() == other, read_text(state))
+    agents = read_text(codex_home / "AGENTS.md")
+    check("AGENTS.md: инструкции на новом языке",
+          there["agents_title"] in agents and here["agents_title"] not in agents, short(agents, 200))
+    check("AGENTS.md: путь к командной строке на месте", str(cli_path(mem_home)) in agents)
+    code, out, err = run_cli(mem_home, codex_home, "status")
+    check("memory status отвечает на новом языке",
+          code == 0 and there["status_files"] in out and here["status_files"] not in out, short(out + err))
+    same = all((codex_home / name).read_bytes() == data for name, data in untouched.items())
+    check("hooks.json и config.toml при смене языка не тронуты (доверие хукам не слетает)", same)
+    code, out, err = run_cli(mem_home, codex_home, "lang", "xx")
+    check("memory lang xx: отказ с ненулевым кодом", code != 0, short(out + err))
+    code, out, err = run_cli(mem_home, codex_home, "lang", LANG)
+    agents = read_text(codex_home / "AGENTS.md")
+    check(f"memory lang {LANG}: язык возвращён",
+          code == 0 and here["agents_title"] in agents and there["agents_title"] not in agents
+          and read_text(state).strip() == LANG, short(out + err))
+
+
 def installed(args: argparse.Namespace) -> int:
+    global LANG, T
     mem_home, codex_home = Path(args.memory_home), Path(args.codex_home)
+    section("Язык")
+    state = mem_home / ".state" / "lang"
+    chosen = read_text(state).strip() if state.is_file() else ""
+    check("выбор языка сохранён в .state/lang", chosen in TEXT, repr(chosen))
+    if args.lang:
+        check(f"установщик выбрал язык {args.lang}", chosen == args.lang, repr(chosen))
+    LANG = chosen if chosen in TEXT else (args.lang or "ru")
+    T = TEXT[LANG]
     check_layout(mem_home)
     entry = check_codex_config(mem_home, codex_home)
     if args.expect_history:
@@ -534,6 +628,7 @@ def installed(args: argparse.Namespace) -> int:
     check_doctor(mem_home, codex_home, args.expect_embeddings)
     if args.install_log:
         check_install_log(Path(args.install_log), args.expect_codex)
+    check_switch(mem_home, codex_home)
     return 0
 
 
@@ -589,6 +684,7 @@ def main() -> int:
     p.add_argument("--memory-home", required=True)
     p.add_argument("--codex-home", required=True)
     p.add_argument("--install-log")
+    p.add_argument("--lang", choices=sorted(TEXT))
     p.add_argument("--expect-codex", action="store_true")
     p.add_argument("--expect-schedule", action="store_true")
     p.add_argument("--expect-history", action="store_true")

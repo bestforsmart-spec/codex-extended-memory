@@ -67,7 +67,8 @@ def main() -> None:
     user = latest_user_message(hm, data.get("transcript_path"))
     if not hm.is_significant(user, assistant):
         return
-    target = hm.append_turn(hm.AUTO_DIR, hm.now_local(), str(data.get("cwd") or ""), user, assistant, "Автозаписи Codex")
+    kind = hm.L("Автозаписи Codex", "Codex auto-records")
+    target = hm.append_turn(hm.AUTO_DIR, hm.now_local(), str(data.get("cwd") or ""), user, assistant, kind)
     hm.spawn_background_sync([target])
 
 

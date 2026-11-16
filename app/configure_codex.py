@@ -21,16 +21,34 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import i18n  # noqa: E402
+from i18n import L  # noqa: E402
+
 SERVER = "extended-memory"
-TOML_BEGIN = "# >>> extended-memory (расширенная память) — управляется установщиком >>>"
+# Первая строка нашего куска в config.toml: по ней он находится при удалении, на каком бы языке ни ставился.
+TOML_BEGINS = (
+    "# >>> extended-memory (расширенная память) — управляется установщиком >>>",
+    "# >>> extended-memory — managed by the installer >>>",
+)
 TOML_END = "# <<< extended-memory <<<"
 AGENTS_BEGIN = "<!-- extended-memory:start -->"
 AGENTS_END = "<!-- extended-memory:end -->"
 AUTO_APPROVE_TOOLS = ("memory_remember", "memory_curate", "memory_sync")
-HOOKS = (
-    ("SessionStart", "hook_session_start.py", 20, "Подключаю расширенную память"),
-    ("Stop", "hook_stop.py", 30, "Сохраняю в расширенную память"),
-)
+HOOK_SCRIPTS = ("hook_session_start.py", "hook_stop.py")
+
+
+def toml_begin() -> str:
+    return TOML_BEGINS[1] if i18n.current() == "en" else TOML_BEGINS[0]
+
+
+def hooks_spec() -> Tuple[Tuple[str, str, int, str], ...]:
+    """Событие, скрипт, тайм-аут и подпись, которую Кодекс показывает, пока хук работает."""
+    return (
+        ("SessionStart", "hook_session_start.py", 20, L("Подключаю расширенную память", "Loading extended memory")),
+        ("Stop", "hook_stop.py", 30, L("Сохраняю в расширенную память", "Saving to extended memory")),
+    )
 
 _header_re = re.compile(r"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$")
 _array_header_re = re.compile(r"^\s*\[\[\s*([^\[\]]+?)\s*\]\]\s*(#.*)?$")
@@ -117,10 +135,11 @@ def scan_toml(lines: List[str]) -> List[Tuple[int, str]]:
 def remove_server_block(text: str) -> str:
     lines = text.splitlines()
     # 1) наш размеченный кусок целиком
-    if TOML_BEGIN in lines:
-        start = lines.index(TOML_BEGIN)
-        end = lines.index(TOML_END, start) if TOML_END in lines[start:] else len(lines) - 1
-        del lines[start:end + 1]
+    for begin in TOML_BEGINS:
+        if begin in lines:
+            start = lines.index(begin)
+            end = lines.index(TOML_END, start) if TOML_END in lines[start:] else len(lines) - 1
+            del lines[start:end + 1]
     # 2) страховка: таблицы нашего сервера, если метки кто-то стёр
     headers = scan_toml(lines)
     drop: List[Tuple[int, int]] = []
@@ -139,7 +158,10 @@ def ensure_hooks_feature(text: str) -> Tuple[str, str]:
     first_header = headers[0][0] if headers else len(lines)
     for line in lines[:first_header]:
         if re.match(r"^\s*features\s*(\.|=)", line):
-            return text, "features задан в корне файла — включите hooks вручную, если они выключены"
+            return text, L(
+                "features задан в корне файла — включите hooks вручную, если они выключены",
+                "features is set at the top level of the file — turn hooks on by hand if they are off",
+            )
     for pos, (idx, name) in enumerate(headers):
         if name != "features":
             continue
@@ -148,12 +170,15 @@ def ensure_hooks_feature(text: str) -> Tuple[str, str]:
             match = re.match(r"^\s*hooks\s*=\s*(\w+)", line)
             if match:
                 if match.group(1) == "true":
-                    return text, "features.hooks уже включён"
-                return text, "ВНИМАНИЕ: в config.toml стоит features.hooks = false — хуки памяти работать не будут"
+                    return text, L("features.hooks уже включён", "features.hooks is already on")
+                return text, L(
+                    "ВНИМАНИЕ: в config.toml стоит features.hooks = false — хуки памяти работать не будут",
+                    "WARNING: config.toml has features.hooks = false — the memory hooks will not run",
+                )
         lines.insert(idx + 1, "hooks = true")
-        return "\n".join(lines).rstrip("\n") + "\n", "включил features.hooks"
+        return "\n".join(lines).rstrip("\n") + "\n", L("включил features.hooks", "turned on features.hooks")
     new_text = text.rstrip("\n") + ("\n\n" if text.strip() else "") + "[features]\nhooks = true\n"
-    return new_text, "добавил [features] hooks = true"
+    return new_text, L("добавил [features] hooks = true", "added [features] hooks = true")
 
 
 def toml_str(value: str) -> str:
@@ -162,7 +187,7 @@ def toml_str(value: str) -> str:
 
 def server_block(python: str, app_dir: Path, mem_home: Path, with_approvals: bool = True) -> str:
     out = [
-        TOML_BEGIN,
+        toml_begin(),
         f"[mcp_servers.{SERVER}]",
         f"command = {toml_str(python)}",
         f"args = [{toml_str(str(app_dir / 'mcp_server.py'))}]",
@@ -206,12 +231,12 @@ def validate_toml(text: str, codex_home: Path, config_path: Path) -> Tuple[bool,
         try:
             tomllib.loads(text)
         except Exception as exc:
-            return False, f"TOML не разбирается: {exc}"
+            return False, L(f"TOML не разбирается: {exc}", f"TOML does not parse: {exc}")
     except ImportError:
         pass
     codex = find_codex_bin()
     if not codex:
-        return True, "проверено без Кодекса (бинарник не найден)"
+        return True, L("проверено без Кодекса (бинарник не найден)", "checked without Codex (binary not found)")
     try:
         proc = subprocess.run(
             [codex, "mcp", "list"],
@@ -223,13 +248,14 @@ def validate_toml(text: str, codex_home: Path, config_path: Path) -> Tuple[bool,
             timeout=40,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return True, f"проверку Кодексом пропустил: {exc}"
+        return True, L(f"проверку Кодексом пропустил: {exc}", f"skipped the check by Codex: {exc}")
     output = (proc.stdout or "") + (proc.stderr or "")
+    shown = output.strip()[:400]
     if proc.returncode != 0:
-        return False, f"Кодекс не принял config.toml: {output.strip()[:400]}"
+        return False, L(f"Кодекс не принял config.toml: {shown}", f"Codex rejected config.toml: {shown}")
     if SERVER not in output:
-        return False, f"Кодекс не видит сервер {SERVER}: {output.strip()[:400]}"
-    return True, "Кодекс принял config.toml и видит сервер"
+        return False, L(f"Кодекс не видит сервер {SERVER}: {shown}", f"Codex does not see the {SERVER} server: {shown}")
+    return True, L("Кодекс принял config.toml и видит сервер", "Codex accepted config.toml and sees the server")
 
 
 def install_config(codex_home: Path, python: str, app_dir: Path, mem_home: Path, hooks: bool) -> None:
@@ -246,16 +272,23 @@ def install_config(codex_home: Path, python: str, app_dir: Path, mem_home: Path,
         write(path, candidate, mode=0o600 if not original else None)
         ok, message = validate_toml(candidate, codex_home, path)
         if ok:
-            say(f"  ✓ config.toml: MCP-сервер {SERVER} прописан ({message}{'; ' + '; '.join(notes) if notes else ''})")
+            extra = "; " + "; ".join(notes) if notes else ""
+            say(L(
+                f"  ✓ config.toml: MCP-сервер {SERVER} прописан ({message}{extra})",
+                f"  ✓ config.toml: MCP server {SERVER} registered ({message}{extra})",
+            ))
             if not with_approvals:
-                say("    (эта версия Кодекса не знает approval_mode — запись в память может спрашивать подтверждение)")
+                say(L(
+                    "    (эта версия Кодекса не знает approval_mode — запись в память может спрашивать подтверждение)",
+                    "    (this Codex version does not know approval_mode — writing to memory may ask for confirmation)",
+                ))
             return
         last_error = message
     if original:
         write(path, original)
     elif path.exists():
         path.unlink()
-    raise SystemExit(f"  ✗ config.toml не изменён: {last_error}")
+    raise SystemExit(L(f"  ✗ config.toml не изменён: {last_error}", f"  ✗ config.toml left unchanged: {last_error}"))
 
 
 def uninstall_config(codex_home: Path) -> None:
@@ -266,7 +299,7 @@ def uninstall_config(codex_home: Path) -> None:
     cleaned = remove_server_block(original)
     if cleaned != original:
         write(path, cleaned)
-        say(f"  ✓ config.toml: сервер {SERVER} убран")
+        say(L(f"  ✓ config.toml: сервер {SERVER} убран", f"  ✓ config.toml: server {SERVER} removed"))
 
 
 # ---------------------------------------------------------------- hooks.json
@@ -280,7 +313,7 @@ def hook_command(python: str, script: str, windows: Optional[bool] = None) -> st
 
 def _is_ours(hook: Dict[str, Any], app_dir: Path) -> bool:
     command = str(hook.get("command", ""))
-    return any(script in command for _, script, _, _ in HOOKS) and (
+    return any(script in command for script in HOOK_SCRIPTS) and (
         str(app_dir) in command or "codex-memory" in command
     )
 
@@ -290,12 +323,15 @@ def install_hooks(codex_home: Path, python: str, app_dir: Path) -> None:
     try:
         data = json.loads(read(path)) if path.exists() and read(path).strip() else {}
     except ValueError as exc:
-        raise SystemExit(f"  ✗ {path} содержит неверный JSON ({exc}) — поправьте его и запустите установку снова")
+        raise SystemExit(L(
+            f"  ✗ {path} содержит неверный JSON ({exc}) — поправьте его и запустите установку снова",
+            f"  ✗ {path} contains invalid JSON ({exc}) — fix it and run the installer again",
+        ))
     if not isinstance(data, dict):
         data = {}
     hooks = data.setdefault("hooks", {})
     changed = False
-    for event, script, timeout, status in HOOKS:
+    for event, script, timeout, status in hooks_spec():
         wanted = {
             "type": "command",
             "command": hook_command(python, str(app_dir / script)),
@@ -316,9 +352,12 @@ def install_hooks(codex_home: Path, python: str, app_dir: Path) -> None:
             changed = True
     if changed:
         write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-        say("  ✓ hooks.json: хуки SessionStart и Stop добавлены (Кодекс попросит им доверять — нажмите Trust)")
+        say(L(
+            "  ✓ hooks.json: хуки SessionStart и Stop добавлены (Кодекс попросит им доверять — нажмите Trust)",
+            "  ✓ hooks.json: SessionStart and Stop hooks added (Codex will ask you to trust them — choose Trust)",
+        ))
     else:
-        say("  ✓ hooks.json: хуки уже на месте")
+        say(L("  ✓ hooks.json: хуки уже на месте", "  ✓ hooks.json: hooks are already in place"))
 
 
 def uninstall_hooks(codex_home: Path, app_dir: Path) -> None:
@@ -328,7 +367,7 @@ def uninstall_hooks(codex_home: Path, app_dir: Path) -> None:
     try:
         data = json.loads(read(path))
     except ValueError:
-        say(f"  ! {path}: неверный JSON, хуки уберите вручную")
+        say(L(f"  ! {path}: неверный JSON, хуки уберите вручную", f"  ! {path}: invalid JSON, remove the hooks by hand"))
         return
     hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
     changed = False
@@ -347,10 +386,15 @@ def uninstall_hooks(codex_home: Path, app_dir: Path) -> None:
             del hooks[event]
     if changed:
         write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-        say("  ✓ hooks.json: хуки памяти убраны")
+        say(L("  ✓ hooks.json: хуки памяти убраны", "  ✓ hooks.json: memory hooks removed"))
 
 
 # ---------------------------------------------------------------- AGENTS.md
+
+def agents_template(app_dir: Path) -> Path:
+    """Инструкции для агента на текущем языке."""
+    return app_dir / "templates" / i18n.current() / "AGENTS-block.md"
+
 
 def install_agents(codex_home: Path, block_template: Path, mem_home: Path) -> None:
     path = codex_home / "AGENTS.md"
@@ -359,17 +403,21 @@ def install_agents(codex_home: Path, block_template: Path, mem_home: Path) -> No
     block = block.replace("{{MEMORY_HOME}}", str(mem_home)).replace("{{MEMORY_CLI}}", str(cli))
     block = f"{AGENTS_BEGIN}\n{block}\n{AGENTS_END}"
     text = read(path)
-    if AGENTS_BEGIN in text and AGENTS_END in text:
+    had_block = AGENTS_BEGIN in text and AGENTS_END in text
+    if had_block:
         start = text.index(AGENTS_BEGIN)
         end = text.index(AGENTS_END, start) + len(AGENTS_END)
         new_text = text[:start] + block + text[end:]
     else:
         new_text = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block + "\n"
-    if new_text != text:
-        write(path, new_text, mode=0o644 if not text else None)
-        say("  ✓ AGENTS.md: инструкции по памяти добавлены")
+    if new_text == text:
+        say(L("  ✓ AGENTS.md: инструкции уже на месте", "  ✓ AGENTS.md: instructions are already in place"))
+        return
+    write(path, new_text, mode=0o644 if not text else None)
+    if had_block:
+        say(L("  ✓ AGENTS.md: инструкции по памяти обновлены", "  ✓ AGENTS.md: memory instructions updated"))
     else:
-        say("  ✓ AGENTS.md: инструкции уже на месте")
+        say(L("  ✓ AGENTS.md: инструкции по памяти добавлены", "  ✓ AGENTS.md: memory instructions added"))
 
 
 def uninstall_agents(codex_home: Path) -> None:
@@ -380,28 +428,53 @@ def uninstall_agents(codex_home: Path) -> None:
         end = text.index(AGENTS_END, start) + len(AGENTS_END)
         new_text = (text[:start].rstrip("\n") + "\n" + text[end:].lstrip("\n")).strip("\n")
         write(path, new_text + "\n" if new_text else "")
-        say("  ✓ AGENTS.md: блок памяти убран")
+        say(L("  ✓ AGENTS.md: блок памяти убран", "  ✓ AGENTS.md: memory block removed"))
 
 
 # ---------------------------------------------------------------- main
 
+def _argument(argv: List[str], name: str) -> Optional[str]:
+    """Значение параметра «--name X» или «--name=X» до разбора argparse: язык нужен уже для текста справки."""
+    for i, item in enumerate(argv):
+        if item == name and i + 1 < len(argv):
+            return argv[i + 1]
+        if item.startswith(name + "="):
+            return item.split("=", 1)[1]
+    return None
+
+
 def main() -> int:
     fix_stdio()
-    parser = argparse.ArgumentParser(description="Подключение расширенной памяти к Кодексу")
-    parser.add_argument("action", choices=["install", "uninstall"])
+    argv = sys.argv[1:]
+    # Язык: флаг --lang → переменная CODEX_MEMORY_LANG → выбор, сохранённый в папке памяти → русский.
+    home_arg = _argument(argv, "--mem-home")
+    home = Path(os.path.expanduser(home_arg)).resolve() if home_arg else None
+    lang = (
+        i18n.normalize(_argument(argv, "--lang"))
+        or i18n.normalize(os.environ.get(i18n.ENV_VAR))
+        or i18n.saved(home)
+        or i18n.FALLBACK
+    )
+    i18n.use(lang)
+
+    parser = argparse.ArgumentParser(description=L("Подключение расширенной памяти к Кодексу", "Connects extended memory to Codex"))
+    parser.add_argument("action", choices=["install", "uninstall", "relang"])
     parser.add_argument("--mem-home", required=True)
     parser.add_argument("--codex-home", default=os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"))
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-hooks", action="store_true")
+    parser.add_argument("--lang", choices=list(i18n.SUPPORTED))
     args = parser.parse_args()
 
     mem_home = Path(os.path.expanduser(args.mem_home)).resolve()
     codex_home = Path(os.path.expanduser(args.codex_home)).resolve()
     app_dir = mem_home / "app"
     files = [codex_home / "config.toml", codex_home / "hooks.json", codex_home / "AGENTS.md"]
+    if args.action == "relang":
+        files = [codex_home / "AGENTS.md"]  # при смене языка меняются только инструкции для агента
     folder = backup(files, mem_home)
     if folder:
-        say(f"  ✓ копии настроек Кодекса: {folder}")
+        say(L(f"  ✓ копии настроек Кодекса: {folder}", f"  ✓ copies of the Codex settings: {folder}"))
 
     if args.action == "install":
         codex_home.mkdir(parents=True, exist_ok=True)
@@ -410,7 +483,12 @@ def main() -> int:
             uninstall_hooks(codex_home, app_dir)
         else:
             install_hooks(codex_home, args.python, app_dir)
-        install_agents(codex_home, app_dir / "templates" / "AGENTS-block.md", mem_home)
+        install_agents(codex_home, agents_template(app_dir), mem_home)
+    elif args.action == "relang":
+        # Подписи хуков в hooks.json намеренно не трогаем: после их правки Кодекс заново просит
+        # доверять хукам, и пока пользователь не подтвердит, память не подмешивается и не сохраняется.
+        codex_home.mkdir(parents=True, exist_ok=True)
+        install_agents(codex_home, agents_template(app_dir), mem_home)
     else:
         uninstall_config(codex_home)
         uninstall_hooks(codex_home, app_dir)

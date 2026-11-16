@@ -11,7 +11,7 @@ import sys
 import time
 import zipfile
 
-PACKAGE = ["README.md", "install.sh", "uninstall.sh", "install.cmd", "uninstall.cmd", "app"]
+PACKAGE = ["README.md", "README.ru.md", "install.sh", "uninstall.sh", "install.cmd", "uninstall.cmd", "app"]
 TOP = "codex-extended-memory"
 EXECUTABLE = {"install.sh", "uninstall.sh"}
 

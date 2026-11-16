@@ -24,13 +24,21 @@ def main() -> int:
     sys.stdout = sys.stderr = log
     sys.path.insert(0, APP_DIR)
     try:
+        from i18n import L
+    except Exception:  # i18n.py не нашёлся или не читается: об ошибке ниже сообщаем по-русски
+
+        def L(ru: str, en: str) -> str:
+            return ru
+
+    try:
         import hybrid_memory as hm
 
         code = hm.main(args)
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 1
     except Exception as exc:  # фоновая задача не должна показывать окно с ошибкой
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} ошибка: {exc!r}")
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(L(f"{stamp} ошибка: {exc!r}", f"{stamp} error: {exc!r}"))
         code = 1
     finally:
         log.flush()

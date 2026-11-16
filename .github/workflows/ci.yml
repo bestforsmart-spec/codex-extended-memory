@@ -1,4 +1,4 @@
-name: Проверка установки
+name: Install check
 
 on:
   push:
@@ -14,13 +14,13 @@ concurrency:
 
 jobs:
   windows-zip:
-    name: Windows · install.cmd из архива
+    name: Windows · install.cmd from the archive, language from the system
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
-      - name: Система
+      - name: System
         shell: pwsh
         continue-on-error: true
         run: |
@@ -29,7 +29,7 @@ jobs:
           python --version
           py -0p
 
-      - name: Codex CLI (чтобы настройки проверил настоящий Кодекс)
+      - name: Codex CLI (so that real Codex validates the settings)
         shell: pwsh
         continue-on-error: true
         run: |
@@ -39,20 +39,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           "CODEX_OK=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Статические проверки
+      - name: Static checks
         shell: pwsh
         run: python tests\win_checks.py . "$env:RUNNER_TEMP\unit"
 
-      - name: Собрать архив и распаковать, как это сделает пользователь
+      - name: Translation checks
+        shell: pwsh
+        run: python tests\i18n_checks.py .
+
+      - name: Build the archive and unpack it the way a user would
         shell: pwsh
         run: |
           python tools\build_zip.py . "$env:RUNNER_TEMP\codex-extended-memory.zip"
-          $dest = Join-Path $env:USERPROFILE 'Downloads\codex-extended-memory-v1.1.0 (1)'
+          $dest = Join-Path $env:USERPROFILE 'Downloads\codex-extended-memory-v1.2.0 (1)'
           Expand-Archive -LiteralPath "$env:RUNNER_TEMP\codex-extended-memory.zip" -DestinationPath $dest
           Get-ChildItem -Recurse -File $dest | ForEach-Object { $_.FullName }
           "PKG=$dest\codex-extended-memory" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Поддельная сессия Кодекса (для проверки загрузки истории)
+      - name: Fake Codex session (to check the history import)
         shell: pwsh
         run: python tests\live_checks.py prepare --codex-home "$env:USERPROFILE\.codex"
 
@@ -64,10 +68,10 @@ jobs:
           type "%RUNNER_TEMP%\install.log"
           exit /b %RC%
 
-      - name: Живые проверки
+      - name: Live checks (English expected on an English system)
         shell: pwsh
         run: |
-          $checks = @('tests\live_checks.py', 'installed',
+          $checks = @('tests\live_checks.py', 'installed', '--lang', 'en',
                       '--memory-home', "$env:USERPROFILE\.codex-memory",
                       '--codex-home', "$env:USERPROFILE\.codex",
                       '--install-log', "$env:RUNNER_TEMP\install.log",
@@ -75,7 +79,7 @@ jobs:
           if ($env:CODEX_OK -eq '1') { $checks += '--expect-codex' }
           python @checks
 
-      - name: Повторная установка поверх (данные не трогает)
+      - name: Install again over the top (data stays untouched)
         shell: cmd
         run: |
           call "%PKG%\install.cmd" --no-pause --no-history > "%RUNNER_TEMP%\install2.log" 2>&1
@@ -87,11 +91,11 @@ jobs:
         shell: cmd
         run: call "%USERPROFILE%\.codex-memory\uninstall.cmd" --no-pause
 
-      - name: Проверки после удаления
+      - name: Checks after removal
         shell: pwsh
         run: python tests\live_checks.py removed --memory-home "$env:USERPROFILE\.codex-memory" --codex-home "$env:USERPROFILE\.codex"
 
-      - name: Журналы памяти
+      - name: Memory logs
         if: always()
         shell: pwsh
         continue-on-error: true
@@ -102,7 +106,7 @@ jobs:
           }
 
   windows-python:
-    name: Windows · Python ${{ matrix.python }}, пути с кириллицей и пробелами
+    name: Windows · Python ${{ matrix.python }}, Russian, paths with Cyrillic and spaces
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
@@ -116,7 +120,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Папки с кириллицей и пробелами
+      - name: Folders with Cyrillic and spaces
         shell: pwsh
         run: |
           $base = Join-Path $env:USERPROFILE 'Мои заметки'
@@ -125,50 +129,75 @@ jobs:
           python --version
           python tests\live_checks.py prepare --codex-home "$base\настройки кодекса"
 
-      - name: Установка
+      - name: Install in Russian
         shell: cmd
         run: |
-          python app\setup_windows.py install --no-pause --memory-home "%MEM%" --codex-home "%CODEXDIR%" > "%RUNNER_TEMP%\install.log" 2>&1
+          python app\setup_windows.py install --no-pause --lang ru --memory-home "%MEM%" --codex-home "%CODEXDIR%" > "%RUNNER_TEMP%\install.log" 2>&1
           set RC=%ERRORLEVEL%
           type "%RUNNER_TEMP%\install.log"
           exit /b %RC%
 
-      - name: Живые проверки
+      - name: Live checks
         shell: pwsh
-        run: python tests\live_checks.py installed --memory-home "$env:MEM" --codex-home "$env:CODEXDIR" --install-log "$env:RUNNER_TEMP\install.log" --expect-schedule --expect-history
+        run: python tests\live_checks.py installed --lang ru --memory-home "$env:MEM" --codex-home "$env:CODEXDIR" --install-log "$env:RUNNER_TEMP\install.log" --expect-schedule --expect-history
 
-      - name: Удаление вместе с данными
+      - name: Uninstall together with the data
         shell: cmd
         run: python "%MEM%\app\setup_windows.py" uninstall --purge --no-pause --memory-home "%MEM%" --codex-home "%CODEXDIR%"
 
-      - name: Проверки после удаления
+      - name: Checks after removal
         shell: pwsh
         run: python tests\live_checks.py removed --purged --memory-home "$env:MEM" --codex-home "$env:CODEXDIR"
 
   linux:
-    name: Linux · install.sh
+    name: Linux · install.sh, ${{ matrix.title }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - title: language from the system (English)
+            flags: ''
+            lang: en
+            legacy: false
+          - title: Russian by flag
+            flags: '--lang ru'
+            lang: ru
+            legacy: false
+          - title: memory from an older version stays Russian
+            flags: ''
+            lang: ru
+            legacy: true
     steps:
       - uses: actions/checkout@v7
 
-      - name: Статические проверки
+      - name: Static checks
         run: python3 tests/win_checks.py . "$RUNNER_TEMP/unit"
 
-      - name: Поддельная сессия Кодекса
+      - name: Translation checks
+        run: python3 tests/i18n_checks.py .
+
+      - name: Fake Codex session
         run: python3 tests/live_checks.py prepare --codex-home "$HOME/.codex"
 
+      - name: Memory left by a version without a language choice
+        if: ${{ matrix.legacy }}
+        run: |
+          mkdir -p "$HOME/.codex-memory"
+          cp app/templates/ru/MEMORY.md "$HOME/.codex-memory/MEMORY.md"
+
       - name: install.sh
-        run: bash install.sh --no-embeddings 2>&1 | tee "$RUNNER_TEMP/install.log"
+        run: bash install.sh --no-embeddings ${{ matrix.flags }} 2>&1 | tee "$RUNNER_TEMP/install.log"
 
-      - name: Живые проверки
-        run: python3 tests/live_checks.py installed --memory-home "$HOME/.codex-memory" --codex-home "$HOME/.codex" --install-log "$RUNNER_TEMP/install.log" --expect-history
+      - name: Live checks
+        run: python3 tests/live_checks.py installed --lang ${{ matrix.lang }} --memory-home "$HOME/.codex-memory" --codex-home "$HOME/.codex" --install-log "$RUNNER_TEMP/install.log" --expect-history
 
-      - name: Задачи cron
+      - name: cron tasks
         run: crontab -l || true
 
       - name: uninstall.sh
         run: bash "$HOME/.codex-memory/uninstall.sh"
 
-      - name: Проверки после удаления
+      - name: Checks after removal
         run: python3 tests/live_checks.py removed --memory-home "$HOME/.codex-memory" --codex-home "$HOME/.codex"
